@@ -1,0 +1,61 @@
+# Created by .ignore support plugin (hsz.mobi)
+.gitignore
+
+# Operating System Files
+
+*.DS_Store
+Thumbs.db
+*.sw?
+.#*
+*#
+*~
+*.sublime-*
+
+# Build Artifacts
+
+.gradle/
+build/
+target/
+bin/
+dependency-reduced-pom.xml
+
+# Eclipse Project Files
+
+.classpath
+.project
+.settings/
+
+# IntelliJ IDEA Files
+
+*.iml
+*.ipr
+*.iws
+*.idea
+
+# Compiled class file
+*.class
+
+# Log file
+*.log
+
+# Package Files #
+*.jar
+*.war
+*.nar
+*.ear
+*.zip
+*.tar.gz
+*.rar
+
+# ide plugin
+.pydevproject
+.factorypath
+arthas-output/
+.dbeaver/
+.vscode/
+.sts4-cache/
+local_Res/
+.apt_generated/
+.apt_generated_tests/
+
+node_modules/
