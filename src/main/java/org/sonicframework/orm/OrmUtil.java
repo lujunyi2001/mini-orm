@@ -1031,9 +1031,9 @@ public class OrmUtil {
 		if(log.isDebugEnabled()) {
 			StringBuilder logParam = new StringBuilder();
 			int logParamIndex = 1;
-			String logParamFormat = "(%s)%s(%s)";
+			String logParamFormat = "(%s)%s%s";
 			for (Object param : params) {
-				logParam.append(String.format(logParamFormat, logParamIndex, param, (param != null?param.getClass().getSimpleName():"")));
+				logParam.append(String.format(logParamFormat, logParamIndex, param, (param != null?("(" + param.getClass().getSimpleName() + ")"):"")));
 				logParam.append(",");
 				logParamIndex++;
 			}
@@ -1128,6 +1128,7 @@ public class OrmUtil {
 		String columnName = null;
 		for (int i = 0; i < columnCount; i++) {
 			columnName = metaData.getColumnLabel(i + 1);
+			System.out.println(columnName + " aaa " + rs.getObject(columnName));
 			bean.setPropertyValue(columnName, rs.getObject(columnName));
 		}
 		return (T) bean.getWrappedInstance();

@@ -5,24 +5,32 @@
 	<groupId>org.sonicframework.orm</groupId>
 	<artifactId>mini-orm</artifactId>
 	<packaging>jar</packaging>
-	<version>1.0.0-SNAPSHOT</version>
+	<version>1.0.0</version>
 	<name>mini-orm</name>
 
 	<properties>
 		<maven.test.skip>true</maven.test.skip>
+		<slf4j.version>1.7.20</slf4j.version>
+    	<h2.version>1.4.200</h2.version>
 	</properties>
 
 	<dependencies>
 		<dependency>
 			<groupId>org.slf4j</groupId>
 			<artifactId>slf4j-api</artifactId>
-			<version>1.7.20</version>
+			<version>${slf4j.version}</version>
 		</dependency>
 		<dependency>
 			<groupId>com.zaxxer</groupId>
 			<artifactId>HikariCP</artifactId>
 			<version>3.4.2</version>
 			<scope>provided</scope>
+		</dependency>
+		<dependency>
+		    <groupId>com.h2database</groupId>
+		    <artifactId>h2</artifactId>
+		    <version>${h2.version}</version>
+		    <scope>test</scope>
 		</dependency>
 		<dependency>
 			<groupId>mysql</groupId>

@@ -1,5 +1,4 @@
 # mini-orm使用说明
-[toc]
 
 
 ## 实体注解
@@ -13,6 +12,7 @@ name:表名
 schema:模式名
 
 ### 作用在成员变量上
+**字段类型如果为基本类型，则需改为对应包装类**
 #### 声明为字段
 
 ##### org.sonicframework.orm.annotation.Id
