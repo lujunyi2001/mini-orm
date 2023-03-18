@@ -1,7 +1,9 @@
 package org.sonicframework.orm.columns;
 
 import java.util.function.Function;
+import java.util.stream.Stream;
 
+import org.sonicframework.orm.exception.OrmException;
 import org.sonicframework.orm.util.LocalStringUtil;
 
 /**
@@ -10,8 +12,9 @@ import org.sonicframework.orm.util.LocalStringUtil;
  */
 public class FieldColumnBuilder {
 
-	private String field;
+	private String[] field;
 	private Function<String, String> decorator;
+	private Function<String[], String> decorators;
 	private String alias;
 	
 	private FieldColumnBuilder() {}
@@ -21,7 +24,7 @@ public class FieldColumnBuilder {
 	 * @param field 字段名（如果引用成员变量内部的成员变量用.分割）
 	 * @return 成员变量字段映射构造器
 	 */
-	public static FieldColumnBuilder create(String field) {
+	public static FieldColumnBuilder create(String... field) {
 		FieldColumnBuilder builder = new FieldColumnBuilder();
 		builder.field = field;
 		return builder;
@@ -34,6 +37,10 @@ public class FieldColumnBuilder {
 	 */
 	public FieldColumnBuilder setColumnDecorator(Function<String, String> decorator) {
 		this.decorator = decorator;
+		return this;
+	}
+	public FieldColumnBuilder setColumnDecorators(Function<String[], String> decorators) {
+		this.decorators = decorators;
 		return this;
 	}
 	
@@ -53,12 +60,23 @@ public class FieldColumnBuilder {
 	 * @return 构建后的查询sql字段
 	 */
 	public String build(Function<String, String> columnParser) {
-		String result = null;
-		if(columnParser != null) {
-			result = columnParser.apply(this.field);
+		if(this.field.length == 0) {
+			throw new OrmException("FieldColumnBuilder field is empty");
 		}
-		if(decorator != null) {
-			result = decorator.apply(result);
+		if(decorators != null && decorator != null) {
+			throw new OrmException("columnDecorator and columnDecorators can not meanwhile exists");
+		}
+		String result = null;
+		String[] columns = null;
+		if(columnParser != null) {
+			columns = Stream.of(field).map(t->columnParser.apply(t)).toArray(String[]::new);
+		}
+		if(decorators != null) {
+			result = decorators.apply(columns);
+		}else if(decorator != null) {
+			result = decorator.apply(columns[0]);
+		}else {
+			result = columns[0];
 		}
 		if(!LocalStringUtil.isEmpty(alias)) {
 			result += " as " + alias;

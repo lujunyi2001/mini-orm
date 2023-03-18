@@ -7,22 +7,13 @@ import java.lang.annotation.Inherited;
 import java.lang.annotation.Retention;
 import java.lang.annotation.Target;
 
-import org.sonicframework.orm.query.QueryType;
-
 /**
- * @author lujunyi
- */
-@Target(ElementType.FIELD)
+* @author lujunyi
+*/
+@Target({ElementType.FIELD}) 
 @Retention(RUNTIME)
 @Inherited
 @ColumnComponete
-public @interface QueryColumn {
+public @interface Lob {
 
-	String name() default "";
-
-	QueryType queryType() default QueryType.EQ;
-
-	String sql() default "";
-
-	boolean hasParam() default true;
 }

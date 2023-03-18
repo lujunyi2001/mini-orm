@@ -11,19 +11,28 @@ import org.sonicframework.orm.beans.ColumnWrapper;
 import org.sonicframework.orm.query.QueryType;
 
 /**
-* @author lujunyi
-*/
-@Target({ElementType.FIELD, ElementType.TYPE}) 
+ * @author lujunyi
+ */
+@Target({ ElementType.FIELD, ElementType.TYPE })
 @Retention(RUNTIME)
 @Inherited
 @ColumnComponete
 public @interface Column {
-    
+
 	String name();
+
 	QueryType queryType() default QueryType.EQ;
-	Class<?extends ColumnWrapper>[] columnWrapper() default {};
-    boolean insertable() default true;
-    boolean updatable() default true;
-    boolean selectable() default true;
+
+	Class<? extends ColumnWrapper>[] columnWrapper() default {};
+
+	boolean insertable() default true;
+
+	boolean updatable() default true;
+
+	boolean selectable() default true;
+
+	String sql() default "";
+
+	boolean hasParam() default true;
 
 }

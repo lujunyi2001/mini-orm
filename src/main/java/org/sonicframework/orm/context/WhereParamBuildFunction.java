@@ -6,5 +6,5 @@ package org.sonicframework.orm.context;
 @FunctionalInterface
 public interface WhereParamBuildFunction<T1, T2> {
 
-	void build(T1 paramList, T2 paramValue);
+	void build(T1 paramList, T2 paramValue, CustomQueryContext customQueryContext);
 }

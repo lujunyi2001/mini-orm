@@ -10,7 +10,7 @@ public enum IdGenerator {
 	AUTO(true, (id)->null),
 	INPUT(false, (id)->id),
 	UUID(false, (id)->{
-		return java.util.UUID.randomUUID().toString();
+		return java.util.UUID.randomUUID().toString().replace("-", "");
 	}),
 	;
 	

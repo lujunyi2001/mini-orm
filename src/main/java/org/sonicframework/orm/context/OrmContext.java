@@ -10,12 +10,14 @@ import java.util.concurrent.ConcurrentHashMap;
 
 import org.sonicframework.orm.annotation.Column;
 import org.sonicframework.orm.annotation.Id;
+import org.sonicframework.orm.annotation.Lob;
 import org.sonicframework.orm.annotation.ManyToOne;
 import org.sonicframework.orm.annotation.OrderBy;
 import org.sonicframework.orm.annotation.QueryColumn;
 import org.sonicframework.orm.annotation.Table;
 import org.sonicframework.orm.exception.OrmException;
 import org.sonicframework.orm.util.ClassUtil;
+import org.sonicframework.orm.util.LocalStringUtil;
 
 /**
 * @author lujunyi
@@ -83,6 +85,8 @@ public class OrmContext {
 				columnContext.setQueryType(queryColumn.queryType());
 				columnContext.setSelectable(false);
 				columnContext.setUpdatable(false);
+				columnContext.setLob(field.isAnnotationPresent(Lob.class));
+				columnContext.setCustomQueryContext(buildCustomQueryContext(queryColumn.sql(), queryColumn.hasParam()));
 				context.add(columnContext);
 			}
 			if(field.isAnnotationPresent(ManyToOne.class)) {
@@ -114,6 +118,8 @@ public class OrmContext {
 					columnContext.setQueryType(column.queryType());
 					columnContext.setSelectable(column.selectable());
 					columnContext.setUpdatable(column.updatable());
+					columnContext.setLob(field.isAnnotationPresent(Lob.class));
+					columnContext.setCustomQueryContext(buildCustomQueryContext(column.sql(), column.hasParam()));
 					if(column.columnWrapper().length > 0) {
 						try {
 							
@@ -135,6 +141,7 @@ public class OrmContext {
 					columnContext.setQueryType(id.queryType());
 					columnContext.setSelectable(id.selectable());
 					columnContext.setUpdatable(id.updatable());
+					columnContext.setCustomQueryContext(buildCustomQueryContext(id.sql(), id.hasParam()));
 					context.add(columnContext);
 					context.setIdColumn(columnContext);
 					context.setIdGenerator(id.generator());
@@ -151,6 +158,16 @@ public class OrmContext {
 			orderByContextList.sort((o1, o2)->o1.getSort() - o2.getSort());
 		}
 		context.setOrderByList(orderByContextList);
+	}
+	
+	private static CustomQueryContext buildCustomQueryContext(String sql, boolean hasParam) {
+		if(LocalStringUtil.isEmpty(sql)) {
+			return null;
+		}
+		CustomQueryContext customQueryContext = new CustomQueryContext();
+		customQueryContext.setHasParam(hasParam);
+		customQueryContext.setSql(sql);
+		return customQueryContext;
 	}
 	
 	private static Class<?> findTableClass(Class<?> clazz){

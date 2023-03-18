@@ -11,18 +11,26 @@ import org.sonicframework.orm.query.IdGenerator;
 import org.sonicframework.orm.query.QueryType;
 
 /**
-* @author lujunyi
-*/
-@Target(ElementType.FIELD) 
+ * @author lujunyi
+ */
+@Target(ElementType.FIELD)
 @Retention(RUNTIME)
 @Inherited
 @ColumnComponete
 public @interface Id {
-    
+
 	String name();
-    boolean selectable() default true;
-    boolean updatable() default true;
-    QueryType queryType() default QueryType.EQ;
-    IdGenerator generator();
+
+	boolean selectable() default true;
+
+	boolean updatable() default true;
+
+	QueryType queryType() default QueryType.EQ;
+
+	IdGenerator generator();
+
+	String sql() default "";
+
+	boolean hasParam() default true;
 
 }

@@ -1,5 +1,6 @@
 package org.sonicframework.orm;
 
+import java.sql.Clob;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -26,6 +27,7 @@ import org.sonicframework.orm.beans.BeanWrapperImpl;
 import org.sonicframework.orm.beans.PageData;
 import org.sonicframework.orm.columns.FieldColumnBuilder;
 import org.sonicframework.orm.context.ColumnContext;
+import org.sonicframework.orm.context.ComplexQueryContext;
 import org.sonicframework.orm.context.JoinContext;
 import org.sonicframework.orm.context.OrderByContext;
 import org.sonicframework.orm.context.OrmContext;
@@ -535,10 +537,23 @@ public class OrmUtil {
 	 * @throws SQLException
 	 */
 	public static <T>List<T> select(T entity, Connection connection) throws SQLException {
+		return select(entity, null, connection);
+		
+	}
+	
+	/**
+	 * 根据条件查询数据列表
+	 * @param entity 查询数据实体
+	 * @param complexQueryContext 复杂查询上下文
+	 * @param connection 数据库连接
+	 * @return
+	 * @throws SQLException
+	 */
+	public static <T>List<T> select(T entity, ComplexQueryContext complexQueryContext, Connection connection) throws SQLException {
 		ResultSet rs = null;
 		PreparedStatement prepareStatement = null;
 		try {
-			SelectQueryContext queryContext = buildSelectQuerySelect(entity);
+			SelectQueryContext queryContext = buildSelectQuerySelect(entity, complexQueryContext);
 			
 			String sql = String.format(SELECT_SQL_FORMAT, 
 					queryContext.selectSql,
@@ -588,13 +603,26 @@ public class OrmUtil {
 	 * @throws SQLException
 	 */
 	public static <T>PageData<T> selectPage(T entity, Connection connection, int page, int pageSize) throws SQLException {
+		return selectPage(entity, null, connection, page, pageSize);
+	}
+	/**
+	 * 根据条件分页查询数据列表
+	 * @param entity 查询数据实体
+	 * @param complexQueryContext 复杂查询上下文
+	 * @param connection 数据库连接
+	 * @param page 页码
+	 * @param pageSize 每页条数
+	 * @return 返回查询结果封装后的分页数据
+	 * @throws SQLException
+	 */
+	public static <T>PageData<T> selectPage(T entity, ComplexQueryContext complexQueryContext, Connection connection, int page, int pageSize) throws SQLException {
 		if(page < 1 || pageSize < 0) {
 			throw new OrmExecuteException("分页参数错误");
 		}
 		ResultSet rs = null;
 		PreparedStatement prepareStatement = null;
 		try {
-			SelectQueryContext queryContext = buildSelectQuerySelect(entity);
+			SelectQueryContext queryContext = buildSelectQuerySelect(entity, complexQueryContext);
 			
 			String countSql = String.format(SELECT_SQL_FORMAT, 
 					"count(1)",
@@ -659,59 +687,27 @@ public class OrmUtil {
 	 * @throws SQLException
 	 */
 	public static <T, R>List<R> selectGroup(T entity, Connection connection, GroupByContext<R> context) throws SQLException {
+		return selectGroup(entity, null, connection, context);
+	}
+	/**
+	 * 通过条件查询分组数据
+	 * @param entity 查询数据实体
+	 * @param complexQueryContext 复杂查询上下文
+	 * @param connection 数据库连接
+	 * @param context 分组信息上下文
+	 * @return 返回分组数据
+	 * @throws SQLException
+	 */
+	public static <T, R>List<R> selectGroup(T entity, ComplexQueryContext complexQueryContext, Connection connection, GroupByContext<R> context) throws SQLException {
 		ResultSet rs = null;
 		PreparedStatement prepareStatement = null;
 		Class<R> clazz = context.getWrapperClass();
 		try {
-			SelectQueryContext queryContext = buildSelectQuerySelect(entity);
+			SelectQueryContext queryContext = buildSelectQuerySelect(entity, complexQueryContext);
 			
 			TableContext tableContext = queryContext.tableContext;
 			Map<Integer, InnerJoinContext> joinMap = queryContext.joinMap;
-			Function<String, String> columnParser = groupField->{
-				String[] split = groupField.split("\\.");
-				String columnName = null;
-				if(split.length < 1) {
-					throw new OrmException(groupField  + " is not a valid");
-				}else if(split.length == 1) {
-					Optional<ColumnContext> columnContext = tableContext.getColumnList().stream().filter(t->Objects.equals(t.getField(), split[0])).findFirst();
-					if(columnContext.isPresent()) {
-						columnName = "t0." + columnContext.get().getColumn();
-					}else{
-						throw new OrmException(groupField  + " is not a column in class:" + entity);
-					}
-				}else {
-					InnerJoinContext parentInnerJoinContext = null;
-					for (int i = 0; i < split.length - 1; i++) {
-						for (Map.Entry<Integer, InnerJoinContext> entry : joinMap.entrySet()) {
-							if(entry.getValue().level != i) {
-								continue;
-							}
-							if(!Objects.equals(entry.getValue().joinContext.getFieldName(), split[i])) {
-								continue;
-							}
-							if(i == 0) {
-								parentInnerJoinContext = entry.getValue();
-							}else {
-								if(parentInnerJoinContext.classIndex == entry.getValue().parentIndex) {
-									parentInnerJoinContext = entry.getValue();
-								}
-							}
-						}
-						if(parentInnerJoinContext == null) {
-							throw new OrmException("unknown fieldName:" + groupField);
-						}
-					}
-					if(parentInnerJoinContext != null) {
-						Optional<ColumnContext> columnContext = parentInnerJoinContext.joinContext.getJoinTable().getColumnList().stream().filter(t->Objects.equals(t.getField(), split[split.length - 1])).findFirst();
-						if(columnContext.isPresent()) {
-							columnName = "t" + parentInnerJoinContext.classIndex + "." + columnContext.get().getColumn();
-						}else{
-							throw new OrmException(groupField  + " is not a column in class:" + entity);
-						}
-					}
-				}
-				return columnName;
-			};
+			Function<String, String> columnParser = buildColumnParser(entity, tableContext, joinMap);
 			List<FieldColumnBuilder> groupList = context.getGroupList();
 			List<FieldColumnBuilder> selectList = context.getSelectList();
 			String groupSql = groupList.stream().map(t->t.build(columnParser)).collect(Collectors.joining(","));
@@ -758,26 +754,90 @@ public class OrmUtil {
 		
 	}
 	
-	private static <T>SelectQueryContext buildSelectQuerySelect(T entity) {
+	private static <T>Function<String, String> buildColumnParser(T entity, TableContext tableContext, Map<Integer, InnerJoinContext> joinMap) {
+		Function<String, String> columnParser = groupField->{
+			String[] split = groupField.split("\\.");
+			String columnName = null;
+			if(split.length < 1) {
+				throw new OrmException(groupField  + " is not a valid");
+			}else if(split.length == 1) {
+				Optional<ColumnContext> columnContext = tableContext.getColumnList().stream().filter(t->Objects.equals(t.getField(), split[0])).findFirst();
+				if(columnContext.isPresent()) {
+					columnName = "t0." + columnContext.get().getColumn();
+				}else{
+					throw new OrmException(groupField  + " is not a column in class:" + entity);
+				}
+			}else {
+				InnerJoinContext parentInnerJoinContext = null;
+				for (int i = 0; i < split.length - 1; i++) {
+					for (Map.Entry<Integer, InnerJoinContext> entry : joinMap.entrySet()) {
+						if(entry.getValue().level != i) {
+							continue;
+						}
+						if(!Objects.equals(entry.getValue().joinContext.getFieldName(), split[i])) {
+							continue;
+						}
+						if(i == 0) {
+							parentInnerJoinContext = entry.getValue();
+						}else {
+							if(parentInnerJoinContext.classIndex == entry.getValue().parentIndex) {
+								parentInnerJoinContext = entry.getValue();
+							}
+						}
+					}
+					if(parentInnerJoinContext == null) {
+						throw new OrmException("unknown fieldName:" + groupField);
+					}
+				}
+				if(parentInnerJoinContext != null) {
+					Optional<ColumnContext> columnContext = parentInnerJoinContext.joinContext.getJoinTable().getColumnList().stream().filter(t->Objects.equals(t.getField(), split[split.length - 1])).findFirst();
+					if(columnContext.isPresent()) {
+						columnName = "t" + parentInnerJoinContext.classIndex + "." + columnContext.get().getColumn();
+					}else{
+						throw new OrmException(groupField  + " is not a column in class:" + entity);
+					}
+				}
+			}
+			return columnName;
+		};
+		return columnParser;
+	}
+	
+	private static <T>SelectQueryContext buildSelectQuerySelect(T entity, ComplexQueryContext complexQueryContext) {
 		TableContext tableContext = OrmContext.parseTableContext(entity.getClass());
 		TableContext topTableContext = tableContext;
 		final Map<String, SelectMapContext> aliasMap = new HashMap<>();
-		List<Class<?>> resultClassList = new ArrayList<>();
+		List<ClassWithPath> resultClassList = new ArrayList<>();
 		List<String> finalSelectSqlList = new ArrayList<>();
 //		List<String> finalTableNameSqlList = new ArrayList<>();
 		List<String> finalWhereSqlList = new ArrayList<>();
 		List<String> finalOrderSqlList = new ArrayList<>();
 		List<Object> finalWhereValueSqlList = new ArrayList<>();
-		List<Object> entityList = new ArrayList<>();
-		resultClassList.add(entity.getClass());
-		entityList.add(entity);
+		List<ObjectWithPath> entityList = new ArrayList<>();
+		resultClassList.add(new ClassWithPath(entity.getClass(), null));
+		entityList.add(new ObjectWithPath(entity, null));
 		Map<Integer, InnerJoinContext> joinMap = buildJoinContextAndPushTableList(tableContext, resultClassList, entityList, entity);
 		String tmpWhereSql = null;
 		String tableName = "";
 		InnerJoinContext innerJoinContext = null;
+		Map<String, Integer> groupWhereContextMap = parseGroupWhereMap(complexQueryContext);
+		Map<Integer, GroupSelectWhere> groupWhereMap = new HashMap<>();
+		Function<String, String> columnParser = buildColumnParser(entity, tableContext, joinMap);
+		
+		Set<String> excludeSelect = new HashSet<String>();
+		if(complexQueryContext != null && complexQueryContext.getExcludeSelectList() != null) {
+			Set<String> exclude = complexQueryContext.getExcludeSelectList().stream().map(t->t.build(columnParser)).collect(Collectors.toSet());
+			for (String str : exclude) {
+				excludeSelect.add(str.split(" ")[0]);
+			}
+		}
+		
+		ClassWithPath classWithPath = null;
+		GroupSelectWhere groupSelectWhere = null;
 		for (int i = 0; i < resultClassList.size(); i++) {
 			final int finalIndex = i;
-			tableContext = OrmContext.parseTableContext(resultClassList.get(i));
+			classWithPath = resultClassList.get(i);
+			tableContext = OrmContext.parseTableContext(classWithPath.clazz);
 			String tableNameAlias = "t" + i;
 			innerJoinContext = joinMap.get(i);
 			if(innerJoinContext != null) {
@@ -791,10 +851,13 @@ public class OrmUtil {
 			
 			List<ColumnContext> columnList = tableContext.getColumnList();
 			String selectSql = columnList.stream().filter(t->t.isSelectable() && t.isExists())
+					.filter(t->{
+						return excludeSelect.isEmpty() || !excludeSelect.contains(tableNameAlias + "." + t.getColumn());
+					})
 					.map(t->{
 						String columnsAlias = t.getField() + "_" + finalIndex + "_";
 						columnsAlias = columnsAlias.toLowerCase();
-						aliasMap.put(columnsAlias, new SelectMapContext(finalIndex, t.getField()));
+						aliasMap.put(columnsAlias, new SelectMapContext(finalIndex, t.getField(), t.isLob()));
 						if(t.getColumnWrapper() == null) {
 							return tableNameAlias + "." + t.getColumn() + " " + columnsAlias;
 						}else {
@@ -804,7 +867,11 @@ public class OrmUtil {
 					
 			finalSelectSqlList.add(selectSql);
 			
-			Object paramEntity = entityList.get(i);
+			Object paramEntity = null;
+			ObjectWithPath objectWithPath = entityList.get(i);
+			if(objectWithPath != null) {
+				paramEntity = objectWithPath.obj;
+			}
 			if(paramEntity != null) {
 				List<String> whereHqlList = new ArrayList<>();
 				List<Object> whereHqlValueList = new ArrayList<>();
@@ -814,10 +881,18 @@ public class OrmUtil {
 				for (ColumnContext columnContext : columnList) {
 					value = bean.getPropertyValue(columnContext.getField());
 					if(value != null) {
-						tmpWhereSql = columnContext.getQueryType().buildWhereSql(tableNameAlias + "." + columnContext.getColumn(), value);
+						tmpWhereSql = columnContext.getQueryType().buildWhereSql(tableNameAlias + "." + columnContext.getColumn(), value, columnContext.getCustomQueryContext());
 						if(!LocalStringUtil.isEmpty(tmpWhereSql)) {
-							whereHqlList.add(tmpWhereSql);
-							columnContext.getQueryType().addParamValue(whereHqlValueList, value);
+							groupSelectWhere = checkGroupWhereAndSet(objectWithPath.path, columnContext.getField(), groupWhereContextMap, groupWhereMap);
+							if(groupSelectWhere == null) {
+								whereHqlList.add(tmpWhereSql);
+								columnContext.getQueryType().addParamValue(whereHqlValueList, value, columnContext.getCustomQueryContext());
+							}else {
+								List<Object> tempWhereHqlValueList = new ArrayList<>();
+								columnContext.getQueryType().addParamValue(tempWhereHqlValueList, value, columnContext.getCustomQueryContext());
+								groupSelectWhere.add(tmpWhereSql, tempWhereHqlValueList.toArray());
+							}
+							
 						}
 						
 					}
@@ -836,6 +911,13 @@ public class OrmUtil {
 			
 		}
 		
+		for (Map.Entry<Integer, GroupSelectWhere> entry : groupWhereMap.entrySet()) {
+			if(!entry.getValue().isEmpty()){
+				finalWhereSqlList.add(entry.getValue().getWhereSql());
+				finalWhereValueSqlList.addAll(entry.getValue().getParams());
+			}
+		}
+		
 		String finalTableSql = tableName;
 //		String finalTableSql = LocalStringUtil.join(finalTableNameSqlList, ",");
 		String finalWhereSql = finalWhereSqlList.isEmpty()?"":"WHERE " + LocalStringUtil.join(finalWhereSqlList, " AND ");
@@ -845,7 +927,7 @@ public class OrmUtil {
 		}
 		
 		SelectQueryContext context = new SelectQueryContext();
-		context.resultClassList = resultClassList;
+		context.resultClassList = resultClassList.stream().map(t->t.clazz).collect(Collectors.toList());
 		context.aliasMap = aliasMap;
 		context.joinMap = joinMap;
 		context.selectSql = LocalStringUtil.join(finalSelectSqlList, ",");
@@ -856,6 +938,40 @@ public class OrmUtil {
 		context.tableContext = topTableContext;
 		
 		return context;
+	}
+	
+	private static GroupSelectWhere checkGroupWhereAndSet(String path, String fieldName, 
+			Map<String, Integer> groupWhereContextMap, Map<Integer, GroupSelectWhere> groupWhereMap) {
+		if(groupWhereContextMap == null || groupWhereContextMap.isEmpty()) {
+			return null;
+		}
+		String str = path == null?fieldName:(path + "." + fieldName);
+		if(!groupWhereContextMap.containsKey(str)) {
+			return null;
+		}
+		Integer key = groupWhereContextMap.get(str);
+		GroupSelectWhere value = groupWhereMap.get(key);
+		if(value == null) {
+			value = new GroupSelectWhere();
+			groupWhereMap.put(key, value);
+		}
+		return value;
+	}
+	
+	private static Map<String, Integer> parseGroupWhereMap(ComplexQueryContext complexQueryContext){
+		if(complexQueryContext == null) {
+			return null;
+		}
+		Map<String, Integer> map = new HashMap<String, Integer>();
+		List<List<String>> conditions = complexQueryContext.getGroupCondition();
+		List<String> temp = null;
+		for (int i = 0; i < conditions.size();i++) {
+			temp = conditions.get(i);
+			for (String str : temp) {
+				map.put(str, i);
+			}
+		}
+		return map;
 	}
 	
 	private static <T>SelectQueryContext buildSelectTopWhere(T entity) {
@@ -874,10 +990,10 @@ public class OrmUtil {
 			for (ColumnContext columnContext : columnList) {
 				value = bean.getPropertyValue(columnContext.getField());
 				if(value != null) {
-					tmpWhereSql = columnContext.getQueryType().buildWhereSql(columnContext.getColumn(), value);
+					tmpWhereSql = columnContext.getQueryType().buildWhereSql(columnContext.getColumn(), value, columnContext.getCustomQueryContext());
 					if(!LocalStringUtil.isEmpty(tmpWhereSql)) {
 						whereHqlList.add(tmpWhereSql);
-						columnContext.getQueryType().addParamValue(whereHqlValueList, value);
+						columnContext.getQueryType().addParamValue(whereHqlValueList, value, columnContext.getCustomQueryContext());
 					}
 					
 				}
@@ -897,7 +1013,7 @@ public class OrmUtil {
 		return context;
 	}
 	
-	private static Map<Integer, InnerJoinContext> buildJoinContextAndPushTableList(TableContext context, List<Class<?>> resultClassList, List<Object> entityList, Object sourceEntity){
+	private static Map<Integer, InnerJoinContext> buildJoinContextAndPushTableList(TableContext context, List<ClassWithPath> resultClassList, List<ObjectWithPath> entityList, Object sourceEntity){
 		List<JoinContext> joinContextList = context.getJoinContextList();
 		if(joinContextList.isEmpty()) {
 			return new HashMap<Integer, InnerJoinContext>();
@@ -909,28 +1025,31 @@ public class OrmUtil {
 				BeanWrapper bean = new BeanWrapperImpl(sourceEntity);
 				entity = bean.getPropertyValue(joinContext.getFieldName());
 			}
-			buildJoinContextAndPushTableList(joinContext, 0, 0, resultMap, resultClassList, entityList, entity);
+			buildJoinContextAndPushTableList(joinContext, 0, 0, resultMap, resultClassList, entityList, entity, joinContext.getFieldName());
 		}
 		return resultMap;
 	}
-	private static void buildJoinContextAndPushTableList(JoinContext joinContext, int parentIndex, int level, Map<Integer, InnerJoinContext> resultMap, List<Class<?>> resultClassList, List<Object> entityList, Object sourceEntity){
+	private static void buildJoinContextAndPushTableList(JoinContext joinContext, int parentIndex, int level, Map<Integer, InnerJoinContext> resultMap, List<ClassWithPath> resultClassList, List<ObjectWithPath> entityList, 
+			Object sourceEntity, String path){
 		int index = resultClassList.size();
 		InnerJoinContext innerJoinContext = new InnerJoinContext(index, parentIndex, joinContext);
 		innerJoinContext.level = level;
 		resultMap.put(index, innerJoinContext);
-		resultClassList.add(joinContext.getFieldClass());
-		entityList.add(sourceEntity);
+		resultClassList.add(new ClassWithPath(joinContext.getFieldClass(), path));
+		entityList.add(new ObjectWithPath(sourceEntity, path));
 		List<JoinContext> joinContextList = joinContext.getJoinTable().getJoinContextList();
 		if(joinContextList.isEmpty()) {
 			return;
 		}
+		String fieldPath = null;
 		for (JoinContext join : joinContextList) {
 			Object entity = null;
 			if(sourceEntity != null) {
 				BeanWrapper bean = new BeanWrapperImpl(sourceEntity);
 				entity = bean.getPropertyValue(join.getFieldName());
 			}
-			buildJoinContextAndPushTableList(join, index, level + 1, resultMap, resultClassList, entityList, entity);
+			fieldPath = path == null?join.getFieldName():(path + "." + join.getFieldName());
+			buildJoinContextAndPushTableList(join, index, level + 1, resultMap, resultClassList, entityList, entity, fieldPath);
 		}
 	}
 	
@@ -978,7 +1097,7 @@ public class OrmUtil {
 		List<BeanWrapper> entityList = null;
 		BeanWrapper bean = null;
 		SelectMapContext select = null;
-		
+		Clob clob = null;
 		while (rs.next()) {
 			entityList = new ArrayList<>(resultClassList.size());
 			for (Class<?> clazz : resultClassList) {
@@ -990,9 +1109,18 @@ public class OrmUtil {
 			for (int i = 0; i < columnCount; i++) {
 				columnName = metaData.getColumnLabel(i + 1);
 				columnName = columnName.toLowerCase();
-				value = rs.getObject(columnName);
 				if(aliasMap.containsKey(columnName)) {
 					select = aliasMap.get(columnName);
+					if(select.isLob) {
+						value = null;
+						clob = rs.getClob(columnName);
+						if(clob != null) {
+							value = clob.getSubString((long)1,(int)clob.length());
+						}
+						
+					}else {
+						value = rs.getObject(columnName);
+					}
 					bean = entityList.get(select.classIndex);
 					if(bean == null) {
 						try {
@@ -1003,7 +1131,7 @@ public class OrmUtil {
 						}
 						entityList.set(select.classIndex, bean);
 					}
-					bean.setPropertyValue(select.field, rs.getObject(columnName));
+					bean.setPropertyValue(select.field, value);
 				}
 			}
 			
@@ -1031,9 +1159,9 @@ public class OrmUtil {
 		if(log.isDebugEnabled()) {
 			StringBuilder logParam = new StringBuilder();
 			int logParamIndex = 1;
-			String logParamFormat = "(%s)%s%s";
+			String logParamFormat = "(%s)%s(%s)";
 			for (Object param : params) {
-				logParam.append(String.format(logParamFormat, logParamIndex, param, (param != null?("(" + param.getClass().getSimpleName() + ")"):"")));
+				logParam.append(String.format(logParamFormat, logParamIndex, param, (param != null?param.getClass().getSimpleName():"")));
 				logParam.append(",");
 				logParamIndex++;
 			}
@@ -1117,21 +1245,42 @@ public class OrmUtil {
 	@SuppressWarnings("unchecked")
 	private static <T>T buildWithWrapper(ResultSet rs, Class<T> clazz) throws SQLException{
 		BeanWrapper bean = null;
-		try {
-			T entity = ClassUtil.newInstance(clazz);
-			bean = new BeanWrapperIgnoreCaseImpl(entity);
-		} catch (Exception e) {
-			throw new OrmExecuteException("实例化" + clazz + "出错", e);
+		Map<String, Object> map = null;
+		boolean isMap = Map.class.isAssignableFrom(clazz);
+		if(isMap) {
+			map = new HashMap<String, Object>();
+		}else {
+			try {
+				T entity = ClassUtil.newInstance(clazz);
+				bean = new BeanWrapperIgnoreCaseImpl(entity);
+			} catch (Exception e) {
+				throw new OrmExecuteException("实例化" + clazz + "出错", e);
+			}
 		}
+		
 		ResultSetMetaData metaData = rs.getMetaData();
 		int columnCount = metaData.getColumnCount();
 		String columnName = null;
+		Object value = null;
 		for (int i = 0; i < columnCount; i++) {
 			columnName = metaData.getColumnLabel(i + 1);
-			System.out.println(columnName + " aaa " + rs.getObject(columnName));
-			bean.setPropertyValue(columnName, rs.getObject(columnName));
+			value = rs.getObject(columnName);
+			if(value != null && value instanceof Clob) {
+				Clob clob = (Clob) value;
+				value = clob.getSubString((long)1,(int)clob.length());
+			}
+			if(isMap) {
+				map.put(columnName, value);
+			}else {
+				bean.setPropertyValue(columnName, value);
+			}
+			
 		}
-		return (T) bean.getWrappedInstance();
+		if(isMap) {
+			return (T) map;
+		}else {
+			return (T) bean.getWrappedInstance();
+		}
 	}
 	
 	static class SelectQueryContext{
@@ -1149,9 +1298,11 @@ public class OrmUtil {
 	static class SelectMapContext{
 		private int classIndex;
 		private String field;
-		public SelectMapContext(int classIndex, String field) {
+		private boolean isLob;
+		public SelectMapContext(int classIndex, String field, boolean isLob) {
 			this.classIndex = classIndex;
 			this.field = field;
+			this.isLob = isLob;
 		}
 		
 	}
@@ -1167,6 +1318,53 @@ public class OrmUtil {
 		}
 		
 	}
+	static class ClassWithPath{
+		public Class<?> clazz;
+		@SuppressWarnings("unused")
+		private String path;
+		public ClassWithPath(Class<?> clazz, String path) {
+			this.clazz = clazz;
+			this.path = path;
+		}
+		
+	}
+	static class ObjectWithPath{
+		public Object obj;
+		private String path;
+		public ObjectWithPath(Object obj, String path) {
+			this.obj = obj;
+			this.path = path;
+		}
+		
+	}
 	
-
+	static class GroupSelectWhere{
+		public List<String> whereList = new ArrayList<>();
+		public List<Object> paramList = new ArrayList<>();
+		
+		public void add(String where, Object...params) {
+			whereList.add(where);
+			paramList.addAll(Arrays.asList(params));
+		}
+		
+		public boolean isEmpty() {
+			return whereList.isEmpty();
+		}
+		
+		public String getWhereSql() {
+			if(whereList.isEmpty()) {
+				return "1=1";
+			}else if(whereList.size() == 1) {
+				return whereList.get(0);
+			}else {
+				return "(" + LocalStringUtil.join(whereList, " OR ") + ")";
+				
+			}
+		}
+		public List<Object> getParams() {
+			return paramList;
+		}
+		
+	}
+	
 }

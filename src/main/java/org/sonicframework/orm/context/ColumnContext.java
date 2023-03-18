@@ -18,6 +18,8 @@ public class ColumnContext {
 	private boolean updatable = true;
 	private boolean isId = false;
 	private boolean exists = true;
+	private boolean lob = false;
+	private CustomQueryContext customQueryContext;
 	public ColumnContext() {
 		// TODO Auto-generated constructor stub
 	}
@@ -80,6 +82,18 @@ public class ColumnContext {
 	}
 	void setColumnWrapper(ColumnWrapper columnWrapper) {
 		this.columnWrapper = columnWrapper;
+	}
+	public boolean isLob() {
+		return lob;
+	}
+	void setLob(boolean lob) {
+		this.lob = lob;
+	}
+	public CustomQueryContext getCustomQueryContext() {
+		return customQueryContext;
+	}
+	public void setCustomQueryContext(CustomQueryContext customQueryContext) {
+		this.customQueryContext = customQueryContext;
 	}
 
 }
