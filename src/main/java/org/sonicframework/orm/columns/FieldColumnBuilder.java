@@ -83,4 +83,12 @@ public class FieldColumnBuilder {
 		}
 		return result;
 	}
+
+	/**
+	 * 返回成员变量名
+	 * @return
+	 */
+	public String[] getField() {
+		return field;
+	}
 }

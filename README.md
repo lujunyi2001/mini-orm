@@ -129,6 +129,7 @@ sort:多字段排序顺序，从小到大排序
 - **NULLORLE** 等同于NULL或LE
 - **NULLORGE** 等同于NULL或GE
 - **NULLORNE** 等同于NULL或NE
+- **CUSTOMER** 自定义模板，声明时需要同时设置sql字段，%s为表字段占位符，和hasParam字段（true:有参数,false:无参数，默认为true）
 
 
 ## 查询工具
@@ -173,11 +174,26 @@ public static <T>int insertBatch(List<T> list, Class<T> entityClass, Connection 
  */
 public static <T>int update(T entity, Connection connection, String ...fields) throws SQLException
 ```
+
+``` java
+/**
+ * 向数据库通过id更新实体数据
+ * @param entity 数据实体
+ * @param complexQueryContext 复杂查询上下文
+ * @param connection 数据库连接
+ * @param fields 要更新的字段，没有参数为更新所有
+ * @return 更新行数
+ * @throws SQLException
+ */
+public static <T>int update(T entity, ComplexQueryContext complexQueryContext, Connection connection, String ...fields) throws SQLException
+```
+
 **注**：
 1、该方法为通过id更新数据，必须要在实体声明id注解，否则抛出OrmException异常，并且id必须有值，否则抛出OrmExecuteException异常
 2、fields为要更新的字段，不填为更新所有字段
 3、该方法不会更新声明字段中updatable为false的字段，如果需要更新updatable为false的字段，需要在fields参数中声明该成员变量名
 4、该方法不会更新默认不会更新id，如需要更新id则要调用org.sonicframework.orm.util.UpdateIdContext的set(Object newId)方法设置更新后的id
+5、ComplexQueryContext参数中可以通过添加updateList实现灵活的更新如col=col+otherCol+1
 
 ### updateBatch方法
 ```java
@@ -238,6 +254,124 @@ public static <T>int deleteBatch(T entity, Connection connection) throws SQLExce
 public static <T>List<T> select(T entity, Connection connection) throws SQLException
 ```
 
+```java
+/**
+	 * 根据条件查询数据列表
+	 * @param entity 查询数据实体
+	 * @param complexQueryContext 复杂查询上下文
+	 * @param connection 数据库连接
+	 * @return
+	 * @throws SQLException
+	 */
+	public static <T>List<T> select(T entity, ComplexQueryContext complexQueryContext, Connection connection) throws SQLException 
+```
+其中org.sonicframework.orm.context.ComplexQueryContext类声明如下:
+```java
+package org.sonicframework.orm.context;
+
+import java.util.ArrayList;
+import java.util.List;
+
+import org.sonicframework.orm.columns.FieldColumnBuilder;
+
+
+/**
+* 复杂查询上下文
+*/
+public class ComplexQueryContext {
+	
+	/**
+	 * 排除select字段列表
+	 */
+	private List<FieldColumnBuilder> excludeSelectList = new ArrayList<FieldColumnBuilder>();;
+
+	/**
+	 * update字段
+	 */
+	private List<FieldColumnBuilder> updateList = new ArrayList<FieldColumnBuilder>();;
+
+	/**
+	 * 查询条件 or分组
+	 */
+	private List<List<String>> groupCondition = new ArrayList<List<String>>();
+
+	/**
+	 * 获取查询条件 or分组
+	 * @return 查询条件 or分组
+	 */
+	public List<List<String>> getGroupCondition() {
+		return groupCondition;
+	}
+
+	/**
+	 * 设置获取查询条件 or分组
+	 * @param groupCondition 获取查询条件 or分组
+	 */
+	public void setGroupCondition(List<List<String>> groupCondition) {
+		this.groupCondition = groupCondition;
+	}
+	
+	/**
+	 * 增加一条获取查询条件 or分组
+	 * @param groupCondition一条获取查询条件 or分组
+	 */
+	public void addGroupCondition(List<String> groupCondition) {
+		if(this.groupCondition != null) {
+			this.groupCondition.add(groupCondition);
+		}
+	}
+	
+	/**
+	 * 获取排除select字段列表
+	 * @return 排除select字段列表
+	 */
+	public List<FieldColumnBuilder> getExcludeSelectList() {
+		return excludeSelectList;
+	}
+	
+	/**
+	 * 设置排除select字段列表
+	 * @param 获取排除select字段列表
+	 */
+	public void setExcludeSelectList(List<FieldColumnBuilder> excludeSelectList) {
+		this.excludeSelectList = excludeSelectList;
+	}
+	
+	/**
+	 * 增加一个排除select字段
+	 * @param 添加排除select字段
+	 */
+	public void addExcludeSelectList(FieldColumnBuilder builder) {
+		this.excludeSelectList.add(builder);
+	}
+	/**
+	 * 获取update字段列表
+	 * @return update字段列表
+	 */
+	public List<FieldColumnBuilder> getUpdateList() {
+		return updateList;
+	}
+	
+	/**
+	 * 设置update字段列表
+	 * @param 设置update字段列表
+	 */
+	public void setUpdateList(List<FieldColumnBuilder> updateList) {
+		this.updateList = updateList;
+	}
+	
+	/**
+	 * 增加一个排除select字段
+	 * @param 添加update字段
+	 */
+	public void addUpdateList(FieldColumnBuilder builder) {
+		this.updateList.add(builder);
+	}
+	
+	
+}
+```
+
 ### selectPage方法
 ```java
 /**
@@ -251,7 +385,22 @@ public static <T>List<T> select(T entity, Connection connection) throws SQLExcep
  */
 public static <T>PageData<T> selectPage(T entity, Connection connection, int page, int pageSize) throws SQLException
 ```
-返回org.sonicframework.orm.beans.PageData<T>声明如下
+
+```java
+/**
+	 * 根据条件分页查询数据列表
+	 * @param entity 查询数据实体
+	 * @param complexQueryContext 复杂查询上下文
+	 * @param connection 数据库连接
+	 * @param page 页码
+	 * @param pageSize 每页条数
+	 * @return 返回查询结果封装后的分页数据
+	 * @throws SQLException
+	 */
+	public static <T>PageData<T> selectPage(T entity, ComplexQueryContext complexQueryContext, Connection connection, int page, int pageSize) throws SQLException
+```
+
+返回com.hjkj.orm.beans.PageData<T>声明如下
 ```java
 /**
  * 分页数据
@@ -307,7 +456,7 @@ public static <T>List<T> selectSqlWithWrapper(Class<T> clazz, Connection connect
 ```
 
 ### selectGroup方法
-该方法
+该方法为分组查询方法,通过GroupByContext添加groupList元素设置分组条件，添加selectList元素设置查询字段
 ```java
 /**
  * 通过条件查询分组数据
@@ -318,6 +467,19 @@ public static <T>List<T> selectSqlWithWrapper(Class<T> clazz, Connection connect
  * @throws SQLException
  */
 public static <T, R>List<R> selectGroup(T entity, Connection connection, GroupByContext<R> context) throws SQLException
+```
+
+```java
+/**
+ * 通过条件查询分组数据
+ * @param entity 查询数据实体
+ * @param complexQueryContext 复杂查询上下文
+ * @param connection 数据库连接
+ * @param context 分组信息上下文
+ * @return 返回分组数据
+ * @throws SQLException
+ */
+ public static <T, R>List<R> selectGroup(T entity, ComplexQueryContext complexQueryContext, Connection connection, GroupByContext<R> context) throws SQLException
 ```
 
 其中org.sonicframework.orm.query.GroupByContext类声明如下:

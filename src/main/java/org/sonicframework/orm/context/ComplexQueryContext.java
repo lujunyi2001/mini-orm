@@ -5,7 +5,6 @@ import java.util.List;
 
 import org.sonicframework.orm.columns.FieldColumnBuilder;
 
-
 /**
 * 复杂查询上下文
 */
@@ -15,6 +14,11 @@ public class ComplexQueryContext {
 	 * 排除select字段列表
 	 */
 	private List<FieldColumnBuilder> excludeSelectList = new ArrayList<FieldColumnBuilder>();;
+	
+	/**
+	 * update字段
+	 */
+	private List<FieldColumnBuilder> updateList = new ArrayList<FieldColumnBuilder>();;
 
 	/**
 	 * 查询条件 or分组
@@ -57,7 +61,7 @@ public class ComplexQueryContext {
 	
 	/**
 	 * 设置排除select字段列表
-	 * @param excludeSelectList 排除select字段列表
+	 * @param 获取排除select字段列表
 	 */
 	public void setExcludeSelectList(List<FieldColumnBuilder> excludeSelectList) {
 		this.excludeSelectList = excludeSelectList;
@@ -65,10 +69,33 @@ public class ComplexQueryContext {
 	
 	/**
 	 * 增加一个排除select字段
-	 * @param builder 排除select字段
+	 * @param 添加排除select字段
 	 */
 	public void addExcludeSelectList(FieldColumnBuilder builder) {
 		this.excludeSelectList.add(builder);
+	}
+	/**
+	 * 获取update字段列表
+	 * @return update字段列表
+	 */
+	public List<FieldColumnBuilder> getUpdateList() {
+		return updateList;
+	}
+	
+	/**
+	 * 设置update字段列表
+	 * @param 设置update字段列表
+	 */
+	public void setUpdateList(List<FieldColumnBuilder> updateList) {
+		this.updateList = updateList;
+	}
+	
+	/**
+	 * 增加一个排除select字段
+	 * @param 添加update字段
+	 */
+	public void addUpdateList(FieldColumnBuilder builder) {
+		this.updateList.add(builder);
 	}
 	
 	

@@ -244,6 +244,18 @@ public class OrmUtil {
 	 * @throws SQLException
 	 */
 	public static <T>int update(T entity, Connection connection, String ...fields) throws SQLException {
+		return update(entity, null, connection, fields);
+	}
+	/**
+	 * 向数据库通过id更新实体数据
+	 * @param entity 数据实体
+	 * @param complexQueryContext 复杂查询上下文
+	 * @param connection 数据库连接
+	 * @param fields 要更新的字段，没有参数为更新所有
+	 * @return 更新行数
+	 * @throws SQLException
+	 */
+	public static <T>int update(T entity, ComplexQueryContext complexQueryContext, Connection connection, String ...fields) throws SQLException {
 		PreparedStatement prepareStatement = null;
 		try {
 			TableContext tableContext = OrmContext.parseTableContext(entity.getClass());
@@ -272,6 +284,18 @@ public class OrmUtil {
 			List<ColumnContext> columnList = tableContext.getColumnList();
 			String item = null;
 			Object value = null;
+			
+			Set<String> excludeUpdateColumnSet = new HashSet<String>();
+			List<String> extColumnList = new ArrayList<String>();
+			if(complexQueryContext != null && complexQueryContext.getUpdateList() != null && !complexQueryContext.getUpdateList().isEmpty()) {
+				Function<String, String> columnParser = buildColumnParser(entity, tableContext, new HashMap<Integer, InnerJoinContext>(), false);
+				List<FieldColumnBuilder> extUpdateList = complexQueryContext.getUpdateList();
+				excludeUpdateColumnSet = extUpdateList.stream().map(t->t.getField()).filter(t->t != null && t.length > 0)
+					.map(t->FieldColumnBuilder.create(t[0]).build(columnParser).toLowerCase()).collect(Collectors.toSet());
+				List<String> extUpdate = extUpdateList.stream().map(t->t.build(columnParser)).collect(Collectors.toList());
+				extColumnList.addAll(extUpdate);
+			}
+			
 			for (ColumnContext columnContext : columnList) {
 				if(!columnContext.isExists() || (columnContext.isId() && updateId == null)) {
 					continue;
@@ -280,6 +304,9 @@ public class OrmUtil {
 					continue;
 				}
 				if(!updateFieldSet.isEmpty() && !updateFieldSet.contains(columnContext.getField())) {
+					continue;
+				}
+				if(excludeUpdateColumnSet.contains(columnContext.getColumn().toLowerCase())) {
 					continue;
 				}
 				value = bean.getPropertyValue(columnContext.getField());
@@ -292,9 +319,7 @@ public class OrmUtil {
 				columnNameList.add(item);
 				columnValueList.add(value);
 			}
-			
-			
-			
+			columnNameList.addAll(extColumnList);
 			
 			String sql = String.format(UPDATE_SQL_FORMAT, 
 					tableName,
@@ -338,6 +363,19 @@ public class OrmUtil {
 	 * @throws SQLException
 	 */
 	public static <T, Q>int updateBatch(T entity, Q queryEntity, Connection connection) throws SQLException {
+		return updateBatch(entity, queryEntity, null, connection);
+	}
+	/**
+	 * 向数据库通过条件更新实体数据,如果条件为空则抛出OrmExecuteException
+	 * @param entity 数据实体
+	 * @param queryEntity 查询实体
+	 * @param complexQueryContext 复杂查询上下文
+	 * @param connection 数据库连接
+	 * @param fields 要更新的字段，没有参数为更新所有
+	 * @return 更新行数
+	 * @throws SQLException
+	 */
+	public static <T, Q>int updateBatch(T entity, Q queryEntity, ComplexQueryContext complexQueryContext, Connection connection) throws SQLException {
 		if(!entity.getClass().isAssignableFrom(queryEntity.getClass())) {
 			throw new OrmException(entity.getClass() + "必须为" + queryEntity.getClass() + "的父类");
 		}
@@ -362,12 +400,27 @@ public class OrmUtil {
 			List<ColumnContext> columnList = tableContext.getColumnList();
 			String item = null;
 			Object value = null;
+			
+			Set<String> excludeUpdateColumnSet = new HashSet<String>();
+			List<String> extColumnList = new ArrayList<String>();
+			if(complexQueryContext != null && complexQueryContext.getUpdateList() != null && !complexQueryContext.getUpdateList().isEmpty()) {
+				Function<String, String> columnParser = buildColumnParser(entity, tableContext, new HashMap<Integer, InnerJoinContext>(), false);
+				List<FieldColumnBuilder> extUpdateList = complexQueryContext.getUpdateList();
+				excludeUpdateColumnSet = extUpdateList.stream().map(t->t.getField()).filter(t->t != null && t.length > 0)
+					.map(t->FieldColumnBuilder.create(t[0]).build(columnParser).toLowerCase()).collect(Collectors.toSet());
+				List<String> extUpdate = extUpdateList.stream().map(t->t.build(columnParser)).collect(Collectors.toList());
+				extColumnList.addAll(extUpdate);
+			}
+			
 			for (ColumnContext columnContext : columnList) {
 				if(!columnContext.isExists()) {
 					continue;
 				}
 				value = bean.getPropertyValue(columnContext.getField());
 				if(value == null) {
+					continue;
+				}
+				if(excludeUpdateColumnSet.contains(columnContext.getColumn().toLowerCase())) {
 					continue;
 				}
 				item = columnContext.getColumn() + "=";
@@ -379,6 +432,8 @@ public class OrmUtil {
 				columnNameList.add(item);
 				columnValueList.add(value);
 			}
+			
+			columnNameList.addAll(extColumnList);
 			
 			if(columnNameList.isEmpty()) {
 				throw new OrmExecuteException(entity.getClass() + "更新字段为空");
@@ -755,6 +810,9 @@ public class OrmUtil {
 	}
 	
 	private static <T>Function<String, String> buildColumnParser(T entity, TableContext tableContext, Map<Integer, InnerJoinContext> joinMap) {
+		return buildColumnParser(entity, tableContext, joinMap, true);
+	}
+	private static <T>Function<String, String> buildColumnParser(T entity, TableContext tableContext, Map<Integer, InnerJoinContext> joinMap, boolean withTableAlias) {
 		Function<String, String> columnParser = groupField->{
 			String[] split = groupField.split("\\.");
 			String columnName = null;
@@ -763,7 +821,7 @@ public class OrmUtil {
 			}else if(split.length == 1) {
 				Optional<ColumnContext> columnContext = tableContext.getColumnList().stream().filter(t->Objects.equals(t.getField(), split[0])).findFirst();
 				if(columnContext.isPresent()) {
-					columnName = "t0." + columnContext.get().getColumn();
+					columnName = (withTableAlias?"t0.":"") + columnContext.get().getColumn();
 				}else{
 					throw new OrmException(groupField  + " is not a column in class:" + entity);
 				}
@@ -792,7 +850,7 @@ public class OrmUtil {
 				if(parentInnerJoinContext != null) {
 					Optional<ColumnContext> columnContext = parentInnerJoinContext.joinContext.getJoinTable().getColumnList().stream().filter(t->Objects.equals(t.getField(), split[split.length - 1])).findFirst();
 					if(columnContext.isPresent()) {
-						columnName = "t" + parentInnerJoinContext.classIndex + "." + columnContext.get().getColumn();
+						columnName = (withTableAlias?("t" + parentInnerJoinContext.classIndex + "."):"") + columnContext.get().getColumn();
 					}else{
 						throw new OrmException(groupField  + " is not a column in class:" + entity);
 					}
