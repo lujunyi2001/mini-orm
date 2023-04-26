@@ -32,6 +32,9 @@ import org.sonicframework.orm.context.JoinContext;
 import org.sonicframework.orm.context.OrderByContext;
 import org.sonicframework.orm.context.OrmContext;
 import org.sonicframework.orm.context.TableContext;
+import org.sonicframework.orm.dialect.Dialect;
+import org.sonicframework.orm.dialect.DialectContextHolder;
+import org.sonicframework.orm.dialect.MysqlDialect;
 import org.sonicframework.orm.exception.OrmException;
 import org.sonicframework.orm.exception.OrmExecuteException;
 import org.sonicframework.orm.query.GroupByContext;
@@ -45,6 +48,8 @@ import org.sonicframework.orm.util.UpdateIdContext;
  * @author lujunyi
  */
 public class OrmUtil {
+	
+	private static Dialect defaultDialect = new MysqlDialect();
 	
 	private static Logger log = LoggerFactory.getLogger(OrmUtil.class);
 
@@ -678,30 +683,25 @@ public class OrmUtil {
 		PreparedStatement prepareStatement = null;
 		try {
 			SelectQueryContext queryContext = buildSelectQuerySelect(entity, complexQueryContext);
-			
-			String countSql = String.format(SELECT_SQL_FORMAT, 
-					"count(1)",
-					queryContext.fromSql, 
-					queryContext.whereSql,
-					""
-					);
+			Dialect dialect = getDialect();
 			List<Object> paramList = queryContext.paramList;
+			
+			String countSql = dialect.decoratePageCount(queryContext.fromSql, queryContext.whereSql, paramList);
 			int total = getTotal(countSql, paramList, connection);
 			
 			List<T> result = new ArrayList<>();
 			if(pageSize != 0) {
+				
 				String sql = String.format(SELECT_SQL_FORMAT, 
 						queryContext.selectSql,
 						queryContext.fromSql, 
 						queryContext.whereSql,
 						queryContext.orderSql
-						) + " limit ? OFFSET ?";
+						);
+				sql = dialect.decoratePageData(sql, paramList, (page - 1) * pageSize, pageSize);
 				if(log.isDebugEnabled()) {
 					log.debug("execute sql=>{}", sql);
 				}
-				
-				paramList.add(pageSize);
-				paramList.add((page - 1) * pageSize);
 				
 				prepareStatement = connection.prepareStatement(sql);
 				int index = 1;
@@ -1339,6 +1339,22 @@ public class OrmUtil {
 		}else {
 			return (T) bean.getWrappedInstance();
 		}
+	}
+	
+	private static Dialect getDialect() {
+		Dialect dialect = DialectContextHolder.get();
+		if(dialect != null) {
+			return dialect;
+		}
+		return defaultDialect;
+	}
+	
+	/**
+	 * 设置默认的数据库方言
+	 * @param dialect 数据库方言
+	 */
+	public static void setDefaultDialect(Dialect dialect) {
+		defaultDialect = dialect;
 	}
 	
 	static class SelectQueryContext{
