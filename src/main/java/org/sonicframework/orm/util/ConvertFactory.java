@@ -24,6 +24,13 @@ public class ConvertFactory {
 		try {
 			if(Date.class.isAssignableFrom(clazz)) {
 				result = (T) parseDateStrictly(value, DATE_FORMAT_ALL);
+				if(result != null) {
+					if(clazz == java.sql.Date.class) {
+						result = (T) new java.sql.Date(((Date)result).getTime());
+					}else if(clazz == java.sql.Timestamp.class) {
+						result = (T) new java.sql.Timestamp(((Date)result).getTime());
+					}
+				}
 			}else if(String.class == clazz) {
 				result = (T) value;
 			}else if(Integer.class == clazz || int.class == clazz) {
