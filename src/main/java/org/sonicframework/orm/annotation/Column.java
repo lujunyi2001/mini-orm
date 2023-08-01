@@ -8,6 +8,7 @@ import java.lang.annotation.Retention;
 import java.lang.annotation.Target;
 
 import org.sonicframework.orm.beans.ColumnWrapper;
+import org.sonicframework.orm.context.jdbctype.JdbcType;
 import org.sonicframework.orm.query.QueryType;
 
 /**
@@ -35,4 +36,5 @@ public @interface Column {
 
 	boolean hasParam() default true;
 
+	JdbcType[] jdbcType() default {};
 }

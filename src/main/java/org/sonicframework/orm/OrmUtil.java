@@ -32,6 +32,7 @@ import org.sonicframework.orm.context.JoinContext;
 import org.sonicframework.orm.context.OrderByContext;
 import org.sonicframework.orm.context.OrmContext;
 import org.sonicframework.orm.context.TableContext;
+import org.sonicframework.orm.context.jdbctype.JdbcType;
 import org.sonicframework.orm.dialect.Dialect;
 import org.sonicframework.orm.dialect.DialectContextHolder;
 import org.sonicframework.orm.dialect.MysqlDialect;
@@ -82,7 +83,7 @@ public class OrmUtil {
 				idValue = bean.getPropertyValue(idColumn.getField());
 				idValue = idGenerator.getIdSupplier().apply(idValue);
 				columnParamList.add("?");
-				columnValueList.add(idValue);
+				columnValueList.add(buildParam(idValue, idColumn.getJdbcType()));
 			}
 			List<ColumnContext> columnList = tableContext.getColumnList();
 			Object value = null;
@@ -97,7 +98,7 @@ public class OrmUtil {
 				}else {
 					columnParamList.add(columnContext.getColumnWrapper().save(columnContext.getColumn(), "?", value));
 				}
-				columnValueList.add(value);
+				columnValueList.add(buildParam(value, columnContext.getJdbcType()));
 			}
 			String sql = String.format(INSERT_SQL_FORMAT, 
 					tableName,
@@ -149,6 +150,15 @@ public class OrmUtil {
 		}
 		
 	}
+	
+	private static Object buildParam(Object obj, JdbcType jdbcType) {
+		if(jdbcType == null) {
+			return obj;
+		}else {
+			return jdbcType.convertToJdbcType(obj);
+		}
+	}
+	
 	private final static String INSERT_BATCH_SQL_FORMAT = "INSERT INTO %s(%s) VALUES%s";
 	
 	/**
@@ -182,7 +192,7 @@ public class OrmUtil {
 					idValue = bean.getPropertyValue(idColumn.getField());
 					idValue = idGenerator.getIdSupplier().apply(idValue);
 					columnParamList.add("?");
-					columnValueList.add(idValue);
+					columnValueList.add(buildParam(idValue, idColumn.getJdbcType()));
 				}
 				List<ColumnContext> columnList = tableContext.getColumnList();
 				Object value = null;
@@ -199,7 +209,7 @@ public class OrmUtil {
 					}else {
 						columnParamList.add(columnContext.getColumnWrapper().save(columnContext.getColumn(), "?", value));
 					}
-					columnValueList.add(value);
+					columnValueList.add(buildParam(value, columnContext.getJdbcType()));
 				}
 				totalColumnParamList.add("(" + LocalStringUtil.join(columnParamList, ",") + ")");
 				isInit = true;
@@ -275,6 +285,7 @@ public class OrmUtil {
 			if(idValue == null) {
 				throw new OrmExecuteException(entity.getClass() + "id不能为空");
 			}
+			idValue = buildParam(idValue, idColumn.getJdbcType());
 			
 			Object updateId = UpdateIdContext.get();
 			if(updateId != null){
@@ -322,7 +333,7 @@ public class OrmUtil {
 					item += columnContext.getColumnWrapper().save(columnContext.getColumn(), "?", value);
 				}
 				columnNameList.add(item);
-				columnValueList.add(value);
+				columnValueList.add(buildParam(value, columnContext.getJdbcType()));
 			}
 			columnNameList.addAll(extColumnList);
 			
@@ -435,7 +446,7 @@ public class OrmUtil {
 					item += columnContext.getColumnWrapper().save(columnContext.getColumn(), "?", value);
 				}
 				columnNameList.add(item);
-				columnValueList.add(value);
+				columnValueList.add(buildParam(value, columnContext.getJdbcType()));
 			}
 			
 			columnNameList.addAll(extColumnList);
@@ -512,7 +523,7 @@ public class OrmUtil {
 				log.debug("execute sql=>{}", sql);
 			}
 			List<Object> columnValueList = new ArrayList<>();
-			columnValueList.add(id);
+			columnValueList.add(buildParam(id, idColumn.getJdbcType()));
 			prepareStatement = connection.prepareStatement(sql);
 			int index = 1;
 			for (Object param : columnValueList) {
@@ -690,7 +701,7 @@ public class OrmUtil {
 			int total = getTotal(countSql, paramList, connection);
 			
 			List<T> result = new ArrayList<>();
-			if(pageSize != 0) {
+			if(total > 0 && pageSize != 0) {
 				
 				String sql = String.format(SELECT_SQL_FORMAT, 
 						queryContext.selectSql,
@@ -944,7 +955,8 @@ public class OrmUtil {
 							groupSelectWhere = checkGroupWhereAndSet(objectWithPath.path, columnContext.getField(), groupWhereContextMap, groupWhereMap);
 							if(groupSelectWhere == null) {
 								whereHqlList.add(tmpWhereSql);
-								columnContext.getQueryType().addParamValue(whereHqlValueList, value, columnContext.getCustomQueryContext());
+								columnContext.getQueryType().addParamValue(whereHqlValueList, 
+										buildParam(value, columnContext.getJdbcType()), columnContext.getCustomQueryContext());
 							}else {
 								List<Object> tempWhereHqlValueList = new ArrayList<>();
 								columnContext.getQueryType().addParamValue(tempWhereHqlValueList, value, columnContext.getCustomQueryContext());
@@ -1051,7 +1063,8 @@ public class OrmUtil {
 					tmpWhereSql = columnContext.getQueryType().buildWhereSql(columnContext.getColumn(), value, columnContext.getCustomQueryContext());
 					if(!LocalStringUtil.isEmpty(tmpWhereSql)) {
 						whereHqlList.add(tmpWhereSql);
-						columnContext.getQueryType().addParamValue(whereHqlValueList, value, columnContext.getCustomQueryContext());
+						columnContext.getQueryType().addParamValue(whereHqlValueList, 
+								buildParam(value, columnContext.getJdbcType()), columnContext.getCustomQueryContext());
 					}
 					
 				}
@@ -1348,7 +1361,7 @@ public class OrmUtil {
 		}
 		return defaultDialect;
 	}
-	
+
 	/**
 	 * 设置默认的数据库方言
 	 * @param dialect 数据库方言

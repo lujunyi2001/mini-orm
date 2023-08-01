@@ -15,6 +15,7 @@ import org.sonicframework.orm.annotation.ManyToOne;
 import org.sonicframework.orm.annotation.OrderBy;
 import org.sonicframework.orm.annotation.QueryColumn;
 import org.sonicframework.orm.annotation.Table;
+import org.sonicframework.orm.context.jdbctype.JdbcType;
 import org.sonicframework.orm.exception.OrmException;
 import org.sonicframework.orm.util.ClassUtil;
 import org.sonicframework.orm.util.LocalStringUtil;
@@ -87,6 +88,7 @@ public class OrmContext {
 				columnContext.setUpdatable(false);
 				columnContext.setLob(field.isAnnotationPresent(Lob.class));
 				columnContext.setCustomQueryContext(buildCustomQueryContext(queryColumn.sql(), queryColumn.hasParam()));
+				columnContext.setJdbcType(findJdbcType(queryColumn.jdbcType(), field.getType()));
 				context.add(columnContext);
 			}
 			if(field.isAnnotationPresent(ManyToOne.class)) {
@@ -120,6 +122,7 @@ public class OrmContext {
 					columnContext.setUpdatable(column.updatable());
 					columnContext.setLob(field.isAnnotationPresent(Lob.class));
 					columnContext.setCustomQueryContext(buildCustomQueryContext(column.sql(), column.hasParam()));
+					columnContext.setJdbcType(findJdbcType(column.jdbcType(), field.getType()));
 					if(column.columnWrapper().length > 0) {
 						try {
 							
@@ -142,6 +145,7 @@ public class OrmContext {
 					columnContext.setSelectable(id.selectable());
 					columnContext.setUpdatable(id.updatable());
 					columnContext.setCustomQueryContext(buildCustomQueryContext(id.sql(), id.hasParam()));
+					columnContext.setJdbcType(findJdbcType(id.jdbcType(), field.getType()));
 					context.add(columnContext);
 					context.setIdColumn(columnContext);
 					context.setIdGenerator(id.generator());
@@ -158,6 +162,16 @@ public class OrmContext {
 			orderByContextList.sort((o1, o2)->o1.getSort() - o2.getSort());
 		}
 		context.setOrderByList(orderByContextList);
+	}
+	
+	private static JdbcType findJdbcType(JdbcType[] jdbcTypes, Class<?> javaType) {
+		if(jdbcTypes.length > 0) {
+			return jdbcTypes[0];
+		}else if(javaType == java.util.Date.class){
+			return JdbcType.DATE;
+		}else {
+			return null;
+		}
 	}
 	
 	private static CustomQueryContext buildCustomQueryContext(String sql, boolean hasParam) {

@@ -26,11 +26,16 @@ selectable:查询时是否查询，默认为true
 updatable:更新时是否更新，默认为true
 queryType:查询方式，默认为QueryType.EQ
 generator:主键生成策略，返回IdGenerator
+jdbcType:数据库中实际映射的字段类型，返回JdbcType
 
 ###### IdGenerator枚举类型
 - **AUTO** 数据库自增
 - **INPUT** 用户输入
 - **UUID** 生成UUID
+
+###### JdbcType枚举类型
+- **DATE** 日期类型,字段类型为java.util.Date,自动映射为java.sql.Date。如果不声明jdbcType并且字段类型为java.util.Date会自动映射为该类型
+- **TIMESTAMP** 日期类型,字段类型为java.util.Date,自动映射为java.sql.Timestamp。
 
 ##### org.sonicframework.orm.annotation.Column
 声明这个变量为表字段
@@ -43,6 +48,8 @@ selectable:查询时是否查询，默认为true
 insertable:插入时是否插入，默认为true
 updatable:更新时是否更新，默认为true
 columnWrapper:生成sql时该字段的包装方法，类型为org.sonicframework.orm.beans.ColumnWrapper，默认为空
+jdbcType:数据库中实际映射的字段类型，返回JdbcType
+
 ###### org.sonicframework.orm.beans.ColumnWrapper的声明
 
 ```java
@@ -81,6 +88,7 @@ public interface ColumnWrapper {
 注解属性如下：
 name:字段名
 queryType:查询方式，默认为QueryType.EQ
+jdbcType:数据库中实际映射的字段类型，返回JdbcType
 
 ##### org.sonicframework.orm.annotation.ManyToOne
 声明这个成员变量为该表的关联表，可以关联查询，同时查询条件也可以在该成员变量中声明，在select时也可以提供查询条件

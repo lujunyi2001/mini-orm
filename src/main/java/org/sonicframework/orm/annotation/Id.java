@@ -7,6 +7,7 @@ import java.lang.annotation.Inherited;
 import java.lang.annotation.Retention;
 import java.lang.annotation.Target;
 
+import org.sonicframework.orm.context.jdbctype.JdbcType;
 import org.sonicframework.orm.query.IdGenerator;
 import org.sonicframework.orm.query.QueryType;
 
@@ -32,5 +33,7 @@ public @interface Id {
 	String sql() default "";
 
 	boolean hasParam() default true;
+
+	JdbcType[] jdbcType() default {};
 
 }

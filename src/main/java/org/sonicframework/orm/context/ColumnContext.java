@@ -1,6 +1,7 @@
 package org.sonicframework.orm.context;
 
 import org.sonicframework.orm.beans.ColumnWrapper;
+import org.sonicframework.orm.context.jdbctype.JdbcType;
 import org.sonicframework.orm.query.QueryType;
 
 /**
@@ -19,6 +20,7 @@ public class ColumnContext {
 	private boolean isId = false;
 	private boolean exists = true;
 	private boolean lob = false;
+	private JdbcType jdbcType;
 	private CustomQueryContext customQueryContext;
 	public ColumnContext() {
 		// TODO Auto-generated constructor stub
@@ -94,6 +96,12 @@ public class ColumnContext {
 	}
 	public void setCustomQueryContext(CustomQueryContext customQueryContext) {
 		this.customQueryContext = customQueryContext;
+	}
+	public JdbcType getJdbcType() {
+		return jdbcType;
+	}
+	public void setJdbcType(JdbcType jdbcType) {
+		this.jdbcType = jdbcType;
 	}
 
 }
