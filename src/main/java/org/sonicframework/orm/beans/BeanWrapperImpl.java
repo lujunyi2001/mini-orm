@@ -11,7 +11,7 @@ import org.sonicframework.orm.util.ConvertFactory;
 /**
 * @author lujunyi
 */
-public class BeanWrapperImpl implements BeanWrapper {
+public class BeanWrapperImpl implements BeanWrapper, DeepBeanWrapper {
 
 	private static Map<Class<?>, Map<String, Field>> cache = new ConcurrentHashMap<>();
 	private Object wrappedInstance;
@@ -20,6 +20,10 @@ public class BeanWrapperImpl implements BeanWrapper {
 	public BeanWrapperImpl(Object obj) {
 		this.wrappedInstance = obj;
 		this.wrappedClass = obj.getClass();
+		init();
+	}
+	public BeanWrapperImpl(Class<?> clazz) {
+		this.wrappedClass = clazz;
 		init();
 	}
 	
@@ -60,6 +64,9 @@ public class BeanWrapperImpl implements BeanWrapper {
 		if(!this.fieldMap.containsKey(propertyName)) {
 			throw new OrmException(this.wrappedClass + "类不包含" + propertyName + "成员变量");
 		}
+		if(this.wrappedInstance == null) {
+			throw new OrmException(this.wrappedClass + "的包装类为空");
+		}
 		Field field = this.fieldMap.get(propertyName);
 		field.setAccessible(true);
 		try {
@@ -73,6 +80,9 @@ public class BeanWrapperImpl implements BeanWrapper {
 	public void setPropertyValue(String propertyName, Object value) {
 		if(!this.fieldMap.containsKey(propertyName)) {
 			throw new OrmException(this.wrappedClass + "类不包含" + propertyName + "成员变量");
+		}
+		if(this.wrappedInstance == null) {
+			throw new OrmException(this.wrappedClass + "的包装类为空");
 		}
 		Field field = this.fieldMap.get(propertyName);
 		field.setAccessible(true);
@@ -95,6 +105,18 @@ public class BeanWrapperImpl implements BeanWrapper {
 		}
 		Field field = this.fieldMap.get(propertyName);
 		return field.getType();
+	}
+
+	@Override
+	public Class<?> getDeepPropertyType(String propertyName) {
+		String[] fieldNames = propertyName.split("\\.");
+		Class<?> propertyType = getPropertyType(fieldNames[0]);
+		BeanWrapper bean = null;
+		for (int i = 1; i < fieldNames.length; i++) {
+			bean = new BeanWrapperImpl(propertyType);
+			propertyType = bean.getPropertyType(fieldNames[i]);
+		}
+		return propertyType;
 	}
 	
 	

@@ -18,7 +18,7 @@ public class GroupByContext<T> {
 	/**
 	 * select字段列表
 	 */
-	private List<FieldColumnBuilder> selectList = new ArrayList<FieldColumnBuilder>();;
+	private List<FieldColumnBuilder> selectList = new ArrayList<FieldColumnBuilder>();
 	/**
 	 * 结果包装类
 	 */

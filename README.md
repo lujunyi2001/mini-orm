@@ -1,5 +1,6 @@
 # mini-orm使用说明
 
+[toc]
 
 ## 实体注解
 ### 作用在类上
@@ -154,7 +155,11 @@ sort:多字段排序顺序，从小到大排序
  */
 public static <T>T insert(T entity, Connection connection) throws SQLException
 ```
-**注**：执行该方法时字段声明insertable为false时不会将值插入数据库
+**注**：
+1. 执行该方法时字段声明insertable为false时不会将值插入数据库
+2. 如果id生成策略为非INPUT但是又要将指定id插入到数据库中，需要调用org.sonicframework.orm.util.InsertUseCustomIdHelper的setForceUseCustomId(true)方法即可将指定id插入为数据id，该方法为一次性调用，下次同样的操作需要再次调用
+
+
 
 ### insertBatch方法
 ```java
@@ -168,7 +173,9 @@ public static <T>T insert(T entity, Connection connection) throws SQLException
  */
 public static <T>int insertBatch(List<T> list, Class<T> entityClass, Connection connection) throws SQLException
 ```
-**注**：执行该方法时字段声明insertable为false时不会将值插入数据库
+**注**：
+1. 执行该方法时字段声明insertable为false时不会将值插入数据库
+2. 如果id生成策略为非INPUT但是又要将指定id插入到数据库中，需要调用org.sonicframework.orm.util.InsertUseCustomIdHelper的setForceUseCustomId(true)方法即可将指定id插入为数据id，该方法为一次性调用，下次同样的操作需要再次调用
 
 ### update方法
 ```java
@@ -288,93 +295,78 @@ import org.sonicframework.orm.columns.FieldColumnBuilder;
 */
 public class ComplexQueryContext {
 	
-	/**
-	 * 排除select字段列表
-	 */
-	private List<FieldColumnBuilder> excludeSelectList = new ArrayList<FieldColumnBuilder>();;
-
-	/**
-	 * update字段
-	 */
-	private List<FieldColumnBuilder> updateList = new ArrayList<FieldColumnBuilder>();;
-
-	/**
-	 * 查询条件 or分组
-	 */
-	private List<List<String>> groupCondition = new ArrayList<List<String>>();
 
 	/**
 	 * 获取查询条件 or分组
 	 * @return 查询条件 or分组
 	 */
-	public List<List<String>> getGroupCondition() {
-		return groupCondition;
-	}
+	public List<List<String>> getGroupCondition()
 
 	/**
 	 * 设置获取查询条件 or分组
 	 * @param groupCondition 获取查询条件 or分组
 	 */
-	public void setGroupCondition(List<List<String>> groupCondition) {
-		this.groupCondition = groupCondition;
-	}
+	public void setGroupCondition(List<List<String>> groupCondition)
 	
 	/**
 	 * 增加一条获取查询条件 or分组
 	 * @param groupCondition一条获取查询条件 or分组
 	 */
-	public void addGroupCondition(List<String> groupCondition) {
-		if(this.groupCondition != null) {
-			this.groupCondition.add(groupCondition);
-		}
-	}
+	public void addGroupCondition(List<String> groupCondition)
 	
 	/**
 	 * 获取排除select字段列表
 	 * @return 排除select字段列表
 	 */
-	public List<FieldColumnBuilder> getExcludeSelectList() {
-		return excludeSelectList;
-	}
+	public List<FieldColumnBuilder> getExcludeSelectList()
 	
 	/**
 	 * 设置排除select字段列表
 	 * @param 获取排除select字段列表
 	 */
-	public void setExcludeSelectList(List<FieldColumnBuilder> excludeSelectList) {
-		this.excludeSelectList = excludeSelectList;
-	}
+	public void setExcludeSelectList(List<FieldColumnBuilder> excludeSelectList)
 	
 	/**
 	 * 增加一个排除select字段
 	 * @param 添加排除select字段
 	 */
-	public void addExcludeSelectList(FieldColumnBuilder builder) {
-		this.excludeSelectList.add(builder);
-	}
+	public void addExcludeSelectList(FieldColumnBuilder builder)
 	/**
 	 * 获取update字段列表
 	 * @return update字段列表
 	 */
-	public List<FieldColumnBuilder> getUpdateList() {
-		return updateList;
-	}
+	public List<FieldColumnBuilder> getUpdateList()
 	
 	/**
 	 * 设置update字段列表
 	 * @param 设置update字段列表
 	 */
-	public void setUpdateList(List<FieldColumnBuilder> updateList) {
-		this.updateList = updateList;
-	}
+	public void setUpdateList(List<FieldColumnBuilder> updateList)
 	
 	/**
-	 * 增加一个排除select字段
+	 * 增加一个update字段
 	 * @param 添加update字段
 	 */
-	public void addUpdateList(FieldColumnBuilder builder) {
-		this.updateList.add(builder);
-	}
+	public void addUpdateList(FieldColumnBuilder builder)
+	
+	
+	/**
+	 * 获取排序字段列表
+	 * @return 排序字段列表
+	 */
+	public List<FieldColumnBuilder> getOrderList()
+	
+	/**
+	 * 设置排序字段列表
+	 * @param 设置排序字段列表
+	 */
+	public void setOrderList(List<FieldColumnBuilder> orderList)
+	
+	/**
+	 * 增加一个排除排序字段
+	 * @param 添加排序字段
+	 */
+	public void addOrderList(FieldColumnBuilder builder)
 	
 	
 }
@@ -408,7 +400,7 @@ public static <T>PageData<T> selectPage(T entity, Connection connection, int pag
 	public static <T>PageData<T> selectPage(T entity, ComplexQueryContext complexQueryContext, Connection connection, int page, int pageSize) throws SQLException
 ```
 
-返回com.hjkj.orm.beans.PageData<T>声明如下
+返回org.sonicframework.orm.beans.PageData<T>声明如下
 ```java
 /**
  * 分页数据
@@ -449,6 +441,12 @@ public class PageData<T> {
 
 ```
 
+**注**: 如果只是要查询条数或者只查询数据，可以调用org.sonicframework.orm.util.PageHelper的setPageContext方法，该方法有2个参数:
+1. queryCount: boolean型，需要查询总数,如果设置为false则PageDate中total为0
+2. queryContent: boolean型，需要查询当前页数据,如果设置为false则PageDate中content为空List
+ 
+
+
 ### selectSqlWithWrapper方法
 ```java
 /**
@@ -463,177 +461,52 @@ public class PageData<T> {
 public static <T>List<T> selectSqlWithWrapper(Class<T> clazz, Connection connection, String sql, Object... params) throws SQLException
 ```
 
-### selectGroup方法
-该方法为分组查询方法,通过GroupByContext添加groupList元素设置分组条件，添加selectList元素设置查询字段
+### merge方法
+该方法为合并方法,通过id或唯一值为条件，增加或修改数据
 ```java
 /**
- * 通过条件查询分组数据
- * @param entity 查询数据实体
+ * 合并数据
+ * @param entity 数据实体
  * @param connection 数据库连接
- * @param context 分组信息上下文
- * @return 返回分组数据
+ * @param mergeFields 合并唯一项
+ * @return 合并结果
  * @throws SQLException
- */
-public static <T, R>List<R> selectGroup(T entity, Connection connection, GroupByContext<R> context) throws SQLException
+*/
+public static <T>MergeResult merge(T entity, Connection connection, String... mergeFields) throws SQLException
 ```
+该方法返回org.sonicframework.orm.beans.MergeResult对象，该对象成员变量如下：
+1. update: boolean类型，合并方法是否为更新
+2. id: Object类型，实体最后的id
 
+**注**: 
+1. 该方法的实体类中必须包含@Id注解
+2. 如果不传入mergeFields则为根据id合并，否则会根据传入的mergeFields查询并更新
+3. 传入mergeFields时，实体里对应的字段不能为空，否则会抛出OrmExecuteException异常
+4. 不传入mergeFields时，实体里id对应的字段不能为空，否则会抛出OrmExecuteException异常
+5. 如果根据id或传入的mergeFields查询出的条数大于1时，会抛出OrmExecuteException异常
+6. 该方法在插入时不会更新insertable为false的字段，在更新时不会更新updatable为false的字段
+
+### mergeWithNoUpdatableColumn方法
+该方法为合并方法,通过id或唯一值为条件，增加或修改数据，该方法会合并所有字段,包括insertable和updatable为false的字段
 ```java
 /**
- * 通过条件查询分组数据
- * @param entity 查询数据实体
- * @param complexQueryContext 复杂查询上下文
+ * 合并数据(合并所有字段,包括insertable和updatable为false的字段)
+ * @param entity 数据实体
  * @param connection 数据库连接
- * @param context 分组信息上下文
- * @return 返回分组数据
+ * @param mergeFields 合并唯一项
+ * @return 合并结果
  * @throws SQLException
- */
- public static <T, R>List<R> selectGroup(T entity, ComplexQueryContext complexQueryContext, Connection connection, GroupByContext<R> context) throws SQLException
+*/
+public static <T>MergeResult mergeWithNoUpdatableColumn(T entity, Connection connection, String... mergeFields) throws SQLException
 ```
+该方法返回org.sonicframework.orm.beans.MergeResult对象，该对象成员变量如下：
+1. update: boolean类型，合并方法是否为更新
+2. id: Object类型，实体最后的id
 
-其中org.sonicframework.orm.query.GroupByContext类声明如下:
-```java
-package org.sonicframework.orm.query;
-
-import java.util.ArrayList;
-import java.util.List;
-
-import org.sonicframework.orm.columns.FieldColumnBuilder;
-
-/**
- * 分组上下文
- * @author lujunyi
- */
-public class GroupByContext<T> {
-
-	/**
-	 * group by字段列表
-	 */
-	private List<FieldColumnBuilder> groupList = new ArrayList<FieldColumnBuilder>();
-	/**
-	 * select字段列表
-	 */
-	private List<FieldColumnBuilder> selectList = new ArrayList<FieldColumnBuilder>();;
-	/**
-	 * 结果包装类
-	 */
-	private Class<T> wrapperClass;
-	public GroupByContext(Class<T> wrapperClass) {
-		this.wrapperClass = wrapperClass;
-	}
-	public GroupByContext(Class<T> wrapperClass, List<FieldColumnBuilder> groupList, List<FieldColumnBuilder> selectList) {
-		this(wrapperClass);
-		this.groupList = groupList;
-		this.selectList = selectList;
-	}
-	public List<FieldColumnBuilder> getGroupList() {
-		return groupList;
-	}
-	public void setGroupList(List<FieldColumnBuilder> groupList) {
-		this.groupList = groupList;
-	}
-	public void addGroupList(FieldColumnBuilder builder) {
-		this.groupList.add(builder);
-	}
-	public List<FieldColumnBuilder> getSelectList() {
-		return selectList;
-	}
-	public void setSelectList(List<FieldColumnBuilder> selectList) {
-		this.selectList = selectList;
-	}
-	public void addSelectList(FieldColumnBuilder builder) {
-		this.selectList.add(builder);
-	}
-	public Class<T> getWrapperClass() {
-		return wrapperClass;
-	}
-	
-	
-}
-
-```
-
-其中org.sonicframework.orm.columns.FieldColumnBuilder类声明如下:
-```java
-package org.sonicframework.orm.columns;
-
-import java.util.function.Function;
-
-import org.sonicframework.orm.util.LocalStringUtil;
-
-/**
- * 成员变量字段映射构造器
- * @author lujunyi
- */
-public class FieldColumnBuilder {
-
-
-	/**
-	 * 创建构造器
-	 * @param field 字段名（如果引用成员变量内部的成员变量用.分割）
-	 * @return 成员变量字段映射构造器
-	 */
-	public static FieldColumnBuilder create(String field)
-
-    /**
-	 * 设置字段转换sql包装器
-	 * @param decorator 字段转换sql包装器
-	 * @return 成员变量字段映射构造器
-	 */
-	public FieldColumnBuilder setColumnDecorator(Function<String, String> decorator)
-
-    /**
-	 * 设置查询别名
-	 * @param alias 别名
-	 * @return 成员变量字段映射构造器
-	 */
-	public FieldColumnBuilder setAlias(String alias)
-
-    /**
-	 * 获取构建后的查询sql字段
-	 * @param columnParser 字段解析器
-	 * @return 构建后的查询sql字段
-	 */
-	public String build(Function<String, String> columnParser)
-	
-	
-}
-
-```
-
-例：
-```java
-    //设置分组上下文，参数为返回包装类
-    GroupByContext<TestWrapperBean> context = new GroupByContext<TestWrapperBean>(TestWrapperBean.class);
-    //构建查询字段
-    context.addSelectList(FieldColumnBuilder.create("intVal").setColumnDecorator(t->"sum(" + t + ")").setAlias("value"));
-	context.addSelectList(FieldColumnBuilder.create("refEntity.name").setAlias("type1"));
-	context.addSelectList(FieldColumnBuilder.create("refEntity2.name").setAlias("type2"));
-    //构建分组字段
-    context.addGroupList(FieldColumnBuilder.create("refEntity.name"));
-    context.addGroupList(FieldColumnBuilder.create("refEntity2.name"));
-    
-    //构建查询字段
-    TestQuery query = new TestQuery();
-    query.setCodeIn(Arrays.asList("0002", "0004"));
-    query.setCodeGt("0002");
-    
-    List<TestWrapperBean> list = OrmUtil.selectGroup(query, dataSource.getConnection(), context);
-    System.out.println(list.size());
-    for (TestWrapperBean testEntity : list) {
-        System.out.println(testEntity);
-    }
-```
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+**注**: 
+1. 该方法的实体类中必须包含@Id注解
+2. 如果不传入mergeFields则为根据id合并，否则会根据传入的mergeFields查询并更新
+3. 传入mergeFields时，实体里对应的字段不能为空，否则会抛出OrmExecuteException异常
+4. 不传入mergeFields时，实体里id对应的字段不能为空，否则会抛出OrmExecuteException异常
+5. 如果根据id或传入的mergeFields查询出的条数大于1时，会抛出OrmExecuteException异常
+6. 该方法在插入时会更新insertable为false的字段，在更新时会更新updatable为false的字段

@@ -49,18 +49,24 @@ public class OrmContext {
 	private static void parseColumnContext(TableContext context, Class<?> entityClass, Class<?> tableClass) {
 		Class<?> clazz = entityClass;
 		Set<String> fieldSet = new HashSet<>();
+		boolean isTableClass = false;
 		while(clazz != tableClass) {
-			parseClazzColumnContext(context, clazz, false, fieldSet);
+			isTableClass = clazz == tableClass;
+			parseClazzColumnContext(context, clazz, isTableClass, fieldSet);
 			clazz = clazz.getSuperclass();
 		}
 		
 		while(clazz != Object.class) {
-			parseClazzColumnContext(context, clazz, true, fieldSet);
+			isTableClass = clazz == tableClass || clazz.isAssignableFrom(tableClass);
+			parseClazzColumnContext(context, clazz, isTableClass, fieldSet, tableClass == clazz);
 			clazz = clazz.getSuperclass();
 		}
 	}
 	
 	private static void parseClazzColumnContext(TableContext context, Class<?> clazz, boolean isTableClass, Set<String> fieldSet) {
+		parseClazzColumnContext(context, clazz, isTableClass, fieldSet, false);
+	}
+	private static void parseClazzColumnContext(TableContext context, Class<?> clazz, boolean isTableClass, Set<String> fieldSet, boolean isThisTableClass) {
 		Field[] fields = clazz.getDeclaredFields();
 		Field field = null;
 		QueryColumn queryColumn = null;
@@ -158,10 +164,12 @@ public class OrmContext {
 				}
 			}
 		}
-		if(orderByContextList.size() > 1) {
-			orderByContextList.sort((o1, o2)->o1.getSort() - o2.getSort());
+		if(isThisTableClass) {
+			if(orderByContextList.size() > 1) {
+				orderByContextList.sort((o1, o2)->o1.getSort() - o2.getSort());
+			}
+			context.setOrderByList(orderByContextList);
 		}
-		context.setOrderByList(orderByContextList);
 	}
 	
 	private static JdbcType findJdbcType(JdbcType[] jdbcTypes, Class<?> javaType) {
@@ -185,12 +193,12 @@ public class OrmContext {
 	}
 	
 	private static Class<?> findTableClass(Class<?> clazz){
-		Class<?> result = clazz;;
+		Class<?> result = clazz;
 		while(!result.isAnnotationPresent(Table.class)) {
 			result = result.getSuperclass();
 		}
 		if(result == Object.class) {
-			throw new OrmException(clazz + "没有添加com.evi.orm.annotation.Table注解");
+			throw new OrmException(clazz + "没有添加org.sonicframework.orm.annotation.Table注解");
 		}
 		return result;
 	}

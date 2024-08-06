@@ -5,8 +5,8 @@ package org.sonicframework.orm.context;
 */
 public enum JoinType {
 
-	LEFT("left join"),
-	INNER("inner join")
+	LEFT("LEFT JOIN"),
+	INNER("INNER JOIN")
 	;
 	
 	private String join;

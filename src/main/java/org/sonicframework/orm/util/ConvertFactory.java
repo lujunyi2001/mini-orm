@@ -93,6 +93,9 @@ public class ConvertFactory {
                 return date;
             }
         }
+        if(str.chars().allMatch(Character::isDigit)) {
+        	return new Date(new Long(str));
+        }
         throw new ParseException("Unable to parse the date: " + str, -1);
     }
 }

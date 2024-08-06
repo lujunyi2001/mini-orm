@@ -13,6 +13,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -24,7 +25,9 @@ import org.slf4j.LoggerFactory;
 import org.sonicframework.orm.beans.BeanWrapper;
 import org.sonicframework.orm.beans.BeanWrapperIgnoreCaseImpl;
 import org.sonicframework.orm.beans.BeanWrapperImpl;
+import org.sonicframework.orm.beans.MergeResult;
 import org.sonicframework.orm.beans.PageData;
+import org.sonicframework.orm.beans.QueryItemDto;
 import org.sonicframework.orm.columns.FieldColumnBuilder;
 import org.sonicframework.orm.context.ColumnContext;
 import org.sonicframework.orm.context.ComplexQueryContext;
@@ -36,12 +39,17 @@ import org.sonicframework.orm.context.jdbctype.JdbcType;
 import org.sonicframework.orm.dialect.Dialect;
 import org.sonicframework.orm.dialect.DialectContextHolder;
 import org.sonicframework.orm.dialect.MysqlDialect;
+import org.sonicframework.orm.dialect.OracleDialect;
 import org.sonicframework.orm.exception.OrmException;
 import org.sonicframework.orm.exception.OrmExecuteException;
 import org.sonicframework.orm.query.GroupByContext;
 import org.sonicframework.orm.query.IdGenerator;
+import org.sonicframework.orm.query.QueryType;
 import org.sonicframework.orm.util.ClassUtil;
+import org.sonicframework.orm.util.InsertUseCustomIdHelper;
 import org.sonicframework.orm.util.LocalStringUtil;
+import org.sonicframework.orm.util.PageContext;
+import org.sonicframework.orm.util.PageHelper;
 import org.sonicframework.orm.util.UpdateIdContext;
 
 /**
@@ -66,6 +74,11 @@ public class OrmUtil {
 	 * @throws SQLException
 	 */
 	public static <T>T insert(T entity, Connection connection) throws SQLException {
+		return doInsert(entity, false, connection);
+		
+	}
+	
+	public static <T>T doInsert(T entity, boolean cancelInsertableField, Connection connection) throws SQLException {
 		ResultSet rs = null;
 		PreparedStatement prepareStatement = null;
 		try {
@@ -78,17 +91,31 @@ public class OrmUtil {
 			List<String> columnParamList = new ArrayList<>();
 			List<Object> columnValueList = new ArrayList<>();
 			Object idValue = null;
+			
+			boolean forceUseCustomId = InsertUseCustomIdHelper.isForceUseCustomId();
+			InsertUseCustomIdHelper.setForceUseCustomId(false);
+			if(forceUseCustomId) {
+				idValue = bean.getPropertyValue(idColumn.getField());
+				if(idValue != null) {
+					log.debug("forceUseCustomId is true");
+					idGenerator = IdGenerator.INPUT;
+				}
+			}
+			
 			if(idColumn != null && idGenerator != IdGenerator.AUTO) {
 				columnNameList.add(idColumn.getColumn());
-				idValue = bean.getPropertyValue(idColumn.getField());
+				idValue = idValue != null?idValue:bean.getPropertyValue(idColumn.getField());
 				idValue = idGenerator.getIdSupplier().apply(idValue);
 				columnParamList.add("?");
-				columnValueList.add(buildParam(idValue, idColumn.getJdbcType()));
+				columnValueList.add(buildParam(idValue, idColumn, connection));
 			}
 			List<ColumnContext> columnList = tableContext.getColumnList();
 			Object value = null;
 			for (ColumnContext columnContext : columnList) {
-				if(!columnContext.isExists() || columnContext.isId() || !columnContext.isInsertable()) {
+				if(!columnContext.isExists() || columnContext.isId()) {
+					continue;
+				}
+				if(!cancelInsertableField && !columnContext.isInsertable()) {
 					continue;
 				}
 				value = bean.getPropertyValue(columnContext.getField());
@@ -98,7 +125,7 @@ public class OrmUtil {
 				}else {
 					columnParamList.add(columnContext.getColumnWrapper().save(columnContext.getColumn(), "?", value));
 				}
-				columnValueList.add(buildParam(value, columnContext.getJdbcType()));
+				columnValueList.add(buildParam(value, columnContext, connection));
 			}
 			String sql = String.format(INSERT_SQL_FORMAT, 
 					tableName,
@@ -121,9 +148,10 @@ public class OrmUtil {
 				index++;
 			}
 			logParam(columnValueList);
+			long start = System.currentTimeMillis();
 			int executeUpdate = prepareStatement.executeUpdate();
 			if(log.isDebugEnabled()) {
-				log.debug("execute result=>total:{}", executeUpdate);
+				log.debug("execute result=>total:{}, cost:{}", executeUpdate, System.currentTimeMillis() - start);
 			}
 			if(executeUpdate > 0) {
 				if(autoId) {
@@ -151,15 +179,21 @@ public class OrmUtil {
 		
 	}
 	
-	private static Object buildParam(Object obj, JdbcType jdbcType) {
+	private static Object buildParam(Object obj, ColumnContext columnContext, Connection connection) throws SQLException {
+		JdbcType jdbcType = columnContext.getJdbcType();
+		Object result = obj;
 		if(jdbcType == null) {
-			return obj;
+			result = obj;
 		}else {
-			return jdbcType.convertToJdbcType(obj);
+			result = jdbcType.convertToJdbcType(obj);
 		}
+		if(result != null && (result instanceof String) && columnContext.isLob()) {
+			Clob clob = connection.createClob();
+			clob.setString(1, (String) result);
+			result = clob;
+		}
+		return result;
 	}
-	
-	private final static String INSERT_BATCH_SQL_FORMAT = "INSERT INTO %s(%s) VALUES%s";
 	
 	/**
 	 * 向数据库插入实体数据
@@ -170,6 +204,9 @@ public class OrmUtil {
 	 * @throws SQLException
 	 */
 	public static <T>int insertBatch(List<T> list, Class<T> entityClass, Connection connection) throws SQLException {
+		if(list == null || list.isEmpty()) {
+			return 0;
+		}
 		ResultSet rs = null;
 		PreparedStatement prepareStatement = null;
 		try {
@@ -178,12 +215,19 @@ public class OrmUtil {
 			ColumnContext idColumn = tableContext.getIdColumn();
 			IdGenerator idGenerator = tableContext.getIdGenerator();
 			List<String> columnNameList = new ArrayList<>();
-			List<String> totalColumnParamList = new ArrayList<>();
 			List<Object> columnValueList = new ArrayList<>();
+			List<String> columnParamList = new ArrayList<>();
+			
+			boolean forceUseCustomId = InsertUseCustomIdHelper.isForceUseCustomId();
+			InsertUseCustomIdHelper.setForceUseCustomId(false);
+			if(forceUseCustomId) {
+				log.debug("forceUseCustomId is true");
+				idGenerator = IdGenerator.INPUT;
+			}
+			
 			boolean isInit = false;
 			for (T t : list) {
 				BeanWrapper bean = new BeanWrapperImpl(t);
-				List<String> columnParamList = new ArrayList<>();
 				Object idValue = null;
 				if(idColumn != null && idGenerator != IdGenerator.AUTO) {
 					if(!isInit){
@@ -191,8 +235,10 @@ public class OrmUtil {
 					}
 					idValue = bean.getPropertyValue(idColumn.getField());
 					idValue = idGenerator.getIdSupplier().apply(idValue);
-					columnParamList.add("?");
-					columnValueList.add(buildParam(idValue, idColumn.getJdbcType()));
+					if(!isInit){
+						columnParamList.add("?");
+					}
+					columnValueList.add(buildParam(idValue, idColumn, connection));
 				}
 				List<ColumnContext> columnList = tableContext.getColumnList();
 				Object value = null;
@@ -204,23 +250,20 @@ public class OrmUtil {
 					if(!isInit){
 						columnNameList.add(columnContext.getColumn());
 					}
-					if(columnContext.getColumnWrapper() == null) {
-						columnParamList.add("?");
-					}else {
-						columnParamList.add(columnContext.getColumnWrapper().save(columnContext.getColumn(), "?", value));
+					if(!isInit){
+						if(columnContext.getColumnWrapper() == null) {
+							columnParamList.add("?");
+						}else {
+							columnParamList.add(columnContext.getColumnWrapper().save(columnContext.getColumn(), "?", value));
+						}
 					}
-					columnValueList.add(buildParam(value, columnContext.getJdbcType()));
+					columnValueList.add(buildParam(value, columnContext, connection));
 				}
-				totalColumnParamList.add("(" + LocalStringUtil.join(columnParamList, ",") + ")");
 				isInit = true;
 			}
 			
-			String sql = String.format(INSERT_BATCH_SQL_FORMAT, 
-					tableName,
-					LocalStringUtil.join(columnNameList, ","), 
-					LocalStringUtil.join(totalColumnParamList, ",")
-					);
-			
+			Dialect dialect = getDialect();
+			String sql = dialect.decorateInsertBatch(tableName, columnNameList, columnParamList, list.size());
 			if(log.isDebugEnabled()) {
 				log.debug("execute sql=>{}", sql);
 			}
@@ -231,9 +274,13 @@ public class OrmUtil {
 				index++;
 			}
 			logParam(columnValueList);
+			long start = System.currentTimeMillis();
 			int executeUpdate = prepareStatement.executeUpdate();
+			if(dialect != null && (dialect instanceof OracleDialect) && executeUpdate > 0) {
+				executeUpdate = list.size();
+			}
 			if(log.isDebugEnabled()) {
-				log.debug("execute result=>total:{}", executeUpdate);
+				log.debug("execute result=>total:{}, cost:{}", executeUpdate, System.currentTimeMillis() - start);
 			}
 			return executeUpdate;
 		} catch (SQLException e) {
@@ -271,6 +318,10 @@ public class OrmUtil {
 	 * @throws SQLException
 	 */
 	public static <T>int update(T entity, ComplexQueryContext complexQueryContext, Connection connection, String ...fields) throws SQLException {
+		return doUpdate(entity, complexQueryContext, false, connection, fields);
+		
+	}
+	private static <T>int doUpdate(T entity, ComplexQueryContext complexQueryContext, boolean cancelUpdatableField, Connection connection, String ...fields) throws SQLException {
 		PreparedStatement prepareStatement = null;
 		try {
 			TableContext tableContext = OrmContext.parseTableContext(entity.getClass());
@@ -285,7 +336,7 @@ public class OrmUtil {
 			if(idValue == null) {
 				throw new OrmExecuteException(entity.getClass() + "id不能为空");
 			}
-			idValue = buildParam(idValue, idColumn.getJdbcType());
+			idValue = buildParam(idValue, idColumn, connection);
 			
 			Object updateId = UpdateIdContext.get();
 			if(updateId != null){
@@ -307,7 +358,7 @@ public class OrmUtil {
 				Function<String, String> columnParser = buildColumnParser(entity, tableContext, new HashMap<Integer, InnerJoinContext>(), false);
 				List<FieldColumnBuilder> extUpdateList = complexQueryContext.getUpdateList();
 				excludeUpdateColumnSet = extUpdateList.stream().map(t->t.getField()).filter(t->t != null && t.length > 0)
-					.map(t->FieldColumnBuilder.create(t[0]).build(columnParser).toLowerCase()).collect(Collectors.toSet());
+						.map(t->FieldColumnBuilder.create(t[0]).build(columnParser).toLowerCase()).collect(Collectors.toSet());
 				List<String> extUpdate = extUpdateList.stream().map(t->t.build(columnParser)).collect(Collectors.toList());
 				extColumnList.addAll(extUpdate);
 			}
@@ -316,7 +367,7 @@ public class OrmUtil {
 				if(!columnContext.isExists() || (columnContext.isId() && updateId == null)) {
 					continue;
 				}
-				if(updateFieldSet.isEmpty() && !columnContext.isUpdatable()) {
+				if(updateFieldSet.isEmpty() && !cancelUpdatableField && !columnContext.isUpdatable()) {
 					continue;
 				}
 				if(!updateFieldSet.isEmpty() && !updateFieldSet.contains(columnContext.getField())) {
@@ -333,7 +384,7 @@ public class OrmUtil {
 					item += columnContext.getColumnWrapper().save(columnContext.getColumn(), "?", value);
 				}
 				columnNameList.add(item);
-				columnValueList.add(buildParam(value, columnContext.getJdbcType()));
+				columnValueList.add(buildParam(value, columnContext, connection));
 			}
 			columnNameList.addAll(extColumnList);
 			
@@ -354,9 +405,10 @@ public class OrmUtil {
 				index++;
 			}
 			logParam(columnValueList);
+			long start = System.currentTimeMillis();
 			int executeUpdate = prepareStatement.executeUpdate();
 			if(log.isDebugEnabled()) {
-				log.debug("execute result=>total:{}", executeUpdate);
+				log.debug("execute result=>total:{}, cost:{}", executeUpdate, System.currentTimeMillis() - start);
 			}
 			return executeUpdate;
 		} catch (SQLException e) {
@@ -399,7 +451,7 @@ public class OrmUtil {
 		try {
 			TableContext tableContext = OrmContext.parseTableContext(entity.getClass());
 			String tableName = LocalStringUtil.isEmpty(tableContext.getSchema())?tableContext.getName():(tableContext.getSchema() + "." + tableContext.getName());
-			SelectQueryContext queryContext = buildSelectTopWhere(queryEntity);
+			SelectQueryContext queryContext = buildSelectTopWhere(queryEntity, connection);
 			TableContext queryTableContext = queryContext.tableContext;
 			String queryTableName = LocalStringUtil.isEmpty(queryTableContext.getSchema())?queryTableContext.getName():(queryTableContext.getSchema() + "." + queryTableContext.getName());
 			if(!Objects.equals(tableName, queryTableName)) {
@@ -446,7 +498,7 @@ public class OrmUtil {
 					item += columnContext.getColumnWrapper().save(columnContext.getColumn(), "?", value);
 				}
 				columnNameList.add(item);
-				columnValueList.add(buildParam(value, columnContext.getJdbcType()));
+				columnValueList.add(buildParam(value, columnContext, connection));
 			}
 			
 			columnNameList.addAll(extColumnList);
@@ -474,9 +526,10 @@ public class OrmUtil {
 				index++;
 			}
 			logParam(columnValueList);
+			long start = System.currentTimeMillis();
 			int executeUpdate = prepareStatement.executeUpdate();
 			if(log.isDebugEnabled()) {
-				log.debug("execute result=>total:{}", executeUpdate);
+				log.debug("execute result=>total:{}, cost:{}", executeUpdate, System.currentTimeMillis() - start);
 			}
 			return executeUpdate;
 		} catch (SQLException e) {
@@ -523,7 +576,7 @@ public class OrmUtil {
 				log.debug("execute sql=>{}", sql);
 			}
 			List<Object> columnValueList = new ArrayList<>();
-			columnValueList.add(buildParam(id, idColumn.getJdbcType()));
+			columnValueList.add(buildParam(id, idColumn, connection));
 			prepareStatement = connection.prepareStatement(sql);
 			int index = 1;
 			for (Object param : columnValueList) {
@@ -531,9 +584,10 @@ public class OrmUtil {
 				index++;
 			}
 			logParam(columnValueList);
+			long start = System.currentTimeMillis();
 			int executeUpdate = prepareStatement.executeUpdate();
 			if(log.isDebugEnabled()) {
-				log.debug("execute result=>total:{}", executeUpdate);
+				log.debug("execute result=>total:{}, cost:{}", executeUpdate, System.currentTimeMillis() - start);
 			}
 			return executeUpdate;
 		} catch (SQLException e) {
@@ -556,7 +610,7 @@ public class OrmUtil {
 	public static <T>int deleteBatch(T entity, Connection connection) throws SQLException {
 		PreparedStatement prepareStatement = null;
 		try {
-			SelectQueryContext queryContext = buildSelectTopWhere(entity);
+			SelectQueryContext queryContext = buildSelectTopWhere(entity, connection);
 			TableContext tableContext = queryContext.tableContext;
 			String tableName = LocalStringUtil.isEmpty(tableContext.getSchema())?tableContext.getName():(tableContext.getSchema() + "." + tableContext.getName());
 			
@@ -583,9 +637,10 @@ public class OrmUtil {
 				index++;
 			}
 			logParam(columnValueList);
+			long start = System.currentTimeMillis();
 			int executeUpdate = prepareStatement.executeUpdate();
 			if(log.isDebugEnabled()) {
-				log.debug("execute result=>total:{}", executeUpdate);
+				log.debug("execute result=>total:{}, cost:{}", executeUpdate, System.currentTimeMillis() - start);
 			}
 			return executeUpdate;
 		} catch (SQLException e) {
@@ -621,11 +676,15 @@ public class OrmUtil {
 	 * @throws SQLException
 	 */
 	public static <T>List<T> select(T entity, ComplexQueryContext complexQueryContext, Connection connection) throws SQLException {
+		SelectQueryContext queryContext = buildSelectQuerySelect(entity, complexQueryContext, connection);
+		return doSelect(queryContext, connection);
+		
+	}
+	
+	private static <T>List<T> doSelect(SelectQueryContext queryContext, Connection connection) throws SQLException{
 		ResultSet rs = null;
 		PreparedStatement prepareStatement = null;
 		try {
-			SelectQueryContext queryContext = buildSelectQuerySelect(entity, complexQueryContext);
-			
 			String sql = String.format(SELECT_SQL_FORMAT, 
 					queryContext.selectSql,
 					queryContext.fromSql, 
@@ -644,11 +703,12 @@ public class OrmUtil {
 				index++;
 			}
 			logParam(paramList);
+			long start = System.currentTimeMillis();
 			rs = prepareStatement.executeQuery();
 			List<T> result = new ArrayList<>();
 			parseSelect(rs, result, queryContext.resultClassList, queryContext.aliasMap, queryContext.joinMap);
 			if(log.isDebugEnabled()) {
-				log.debug("execute result=>total:{}", result.size());
+				log.debug("execute result=>total:{}, cost:{}", result.size(), System.currentTimeMillis() - start);
 			}
 			return result;
 		} catch (SQLException e) {
@@ -661,7 +721,6 @@ public class OrmUtil {
 				prepareStatement.close();
 			}
 		}
-		
 	}
 	
 	/**
@@ -687,21 +746,37 @@ public class OrmUtil {
 	 * @throws SQLException
 	 */
 	public static <T>PageData<T> selectPage(T entity, ComplexQueryContext complexQueryContext, Connection connection, int page, int pageSize) throws SQLException {
+		SelectQueryContext queryContext = buildSelectQuerySelect(entity, complexQueryContext, connection);
+		return doSelectPage(queryContext, connection, page, pageSize);
+	}
+	private static <T>PageData<T> doSelectPage(SelectQueryContext queryContext, Connection connection, int page, int pageSize) throws SQLException {
 		if(page < 1 || pageSize < 0) {
 			throw new OrmExecuteException("分页参数错误");
 		}
+		boolean queryContent = true;
+		boolean queryCount = true;
+		PageContext pageContext = PageHelper.getPageContext();
+		PageHelper.clearPageContext();
+		if(pageContext != null) {
+			queryContent = pageContext.isQueryContent();
+			queryCount = pageContext.isQueryCount();
+			log.debug("pageContext queryContent:[{}], queryCount:[{}]", queryContent, queryCount);
+		}
+		
 		ResultSet rs = null;
 		PreparedStatement prepareStatement = null;
 		try {
-			SelectQueryContext queryContext = buildSelectQuerySelect(entity, complexQueryContext);
 			Dialect dialect = getDialect();
 			List<Object> paramList = queryContext.paramList;
 			
-			String countSql = dialect.decoratePageCount(queryContext.fromSql, queryContext.whereSql, paramList);
-			int total = getTotal(countSql, paramList, connection);
+			int total = 0;
+			if(queryCount) {
+				String countSql = dialect.decoratePageCount(queryContext.fromSql, queryContext.whereSql, paramList);
+				total = getTotal(countSql, paramList, connection);
+			}
 			
 			List<T> result = new ArrayList<>();
-			if(total > 0 && pageSize != 0) {
+			if((total > 0 || !queryCount) && queryContent && pageSize != 0) {
 				
 				String sql = String.format(SELECT_SQL_FORMAT, 
 						queryContext.selectSql,
@@ -721,10 +796,11 @@ public class OrmUtil {
 					index++;
 				}
 				logParam(paramList);
+				long start = System.currentTimeMillis();
 				rs = prepareStatement.executeQuery();
 				parseSelect(rs, result, queryContext.resultClassList, queryContext.aliasMap, queryContext.joinMap);
 				if(log.isDebugEnabled()) {
-					log.debug("execute result=>total:{}", result.size());
+					log.debug("execute result=>total:{}, cost:{}", result.size(), System.currentTimeMillis() - start);
 				}
 			}
 			
@@ -769,7 +845,7 @@ public class OrmUtil {
 		PreparedStatement prepareStatement = null;
 		Class<R> clazz = context.getWrapperClass();
 		try {
-			SelectQueryContext queryContext = buildSelectQuerySelect(entity, complexQueryContext);
+			SelectQueryContext queryContext = buildSelectQuerySelect(entity, complexQueryContext, connection);
 			
 			TableContext tableContext = queryContext.tableContext;
 			Map<Integer, InnerJoinContext> joinMap = queryContext.joinMap;
@@ -782,7 +858,7 @@ public class OrmUtil {
 			List<Object> paramList = queryContext.paramList;
 			
 			String sql = String.format(SELECT_GROUP_SQL_FORMAT, 
-					selectSql,
+					(complexQueryContext != null && complexQueryContext.isDistinct()?"distinct ":"") + selectSql,
 					queryContext.fromSql, 
 					queryContext.whereSql,
 					(LocalStringUtil.isEmpty(groupSql)?"":"group by ") + groupSql
@@ -819,11 +895,97 @@ public class OrmUtil {
 		}
 		
 	}
+	/**
+	 * 通过条件查询分组数据
+	 * @param entity 查询数据实体
+	 * @param complexQueryContext 复杂查询上下文
+	 * @param connection 数据库连接
+	 * @param context 分组信息上下文
+	 * @return 返回分组数据
+	 * @throws SQLException
+	 */
+	public static <T, R>PageData<R> selectGroupPage(T entity, ComplexQueryContext complexQueryContext, Connection connection, GroupByContext<R> context, int page, int pageSize) throws SQLException {
+		ResultSet rs = null;
+		PreparedStatement prepareStatement = null;
+		Class<R> clazz = context.getWrapperClass();
+		try {
+			SelectQueryContext queryContext = buildSelectQuerySelect(entity, complexQueryContext, connection);
+			
+			TableContext tableContext = queryContext.tableContext;
+			Map<Integer, InnerJoinContext> joinMap = queryContext.joinMap;
+			Function<String, String> columnParser = buildColumnParser(entity, tableContext, joinMap);
+			List<FieldColumnBuilder> groupList = context.getGroupList();
+			List<FieldColumnBuilder> selectList = context.getSelectList();
+			String groupSql = groupList.stream().map(t->t.build(columnParser)).collect(Collectors.joining(","));
+			String selectSql = selectList.stream().map(t->t.build(columnParser)).collect(Collectors.joining(","));
+			
+			List<Object> paramList = queryContext.paramList;
+			
+			String sql = String.format(SELECT_GROUP_SQL_FORMAT, 
+					(complexQueryContext != null && complexQueryContext.isDistinct()?"distinct ":"") + selectSql,
+					queryContext.fromSql, 
+					queryContext.whereSql,
+					(LocalStringUtil.isEmpty(groupSql)?"":"group by ") + groupSql
+					);
+			
+			Dialect dialect = getDialect();
+			
+			String fromSql = "(" + sql + ") grouptable";
+			String countSql = dialect.decoratePageCount(fromSql, "", paramList);
+			int total = getTotal(countSql, paramList, connection);
+			
+			List<R> result = new ArrayList<>();
+			if(total > 0) {
+				
+				String listSql = String.format(SELECT_SQL_FORMAT, 
+						"*",
+						fromSql, 
+						"",
+						""
+						);
+				sql = dialect.decoratePageData(listSql, paramList, (page - 1) * pageSize, pageSize);
+				if(log.isDebugEnabled()) {
+					log.debug("execute sql=>{}", sql);
+				}
+				
+				prepareStatement = connection.prepareStatement(sql);
+				int index = 1;
+				for (Object param : paramList) {
+					prepareStatement.setObject(index, param);
+					index++;
+				}
+				logParam(paramList);
+				long start = System.currentTimeMillis();
+				rs = prepareStatement.executeQuery();
+				while (rs.next()) {
+					result.add(buildWithWrapper(rs, clazz));
+				}
+				if(log.isDebugEnabled()) {
+					log.debug("execute result=>total:{}, cost:{}", result.size(), System.currentTimeMillis() - start);
+				}
+			}
+			
+			return buildPage(result, total, pageSize);
+		} catch (SQLException e) {
+			throw e;
+		}finally {
+			if(rs != null) {
+				rs.close();
+			}
+			if(prepareStatement != null) {
+				prepareStatement.close();
+			}
+		}
+		
+	}
 	
 	private static <T>Function<String, String> buildColumnParser(T entity, TableContext tableContext, Map<Integer, InnerJoinContext> joinMap) {
 		return buildColumnParser(entity, tableContext, joinMap, true);
 	}
 	private static <T>Function<String, String> buildColumnParser(T entity, TableContext tableContext, Map<Integer, InnerJoinContext> joinMap, boolean withTableAlias) {
+		return buildColumnParser(entity.getClass(), tableContext, joinMap, withTableAlias);
+	}
+	private static <T>Function<String, String> buildColumnParser(Class<T> clazz, TableContext tableContext, Map<Integer, InnerJoinContext> joinMap, boolean withTableAlias) {
 		Function<String, String> columnParser = groupField->{
 			String[] split = groupField.split("\\.");
 			String columnName = null;
@@ -834,7 +996,7 @@ public class OrmUtil {
 				if(columnContext.isPresent()) {
 					columnName = (withTableAlias?"t0.":"") + columnContext.get().getColumn();
 				}else{
-					throw new OrmException(groupField  + " is not a column in class:" + entity);
+					throw new OrmException(groupField  + " is not a column in class:" + clazz);
 				}
 			}else {
 				InnerJoinContext parentInnerJoinContext = null;
@@ -863,7 +1025,7 @@ public class OrmUtil {
 					if(columnContext.isPresent()) {
 						columnName = (withTableAlias?("t" + parentInnerJoinContext.classIndex + "."):"") + columnContext.get().getColumn();
 					}else{
-						throw new OrmException(groupField  + " is not a column in class:" + entity);
+						throw new OrmException(groupField  + " is not a column in class:" + clazz);
 					}
 				}
 			}
@@ -872,7 +1034,7 @@ public class OrmUtil {
 		return columnParser;
 	}
 	
-	private static <T>SelectQueryContext buildSelectQuerySelect(T entity, ComplexQueryContext complexQueryContext) {
+	private static <T>SelectQueryContext buildSelectQuerySelect(T entity, ComplexQueryContext complexQueryContext, Connection connection) throws SQLException {
 		TableContext tableContext = OrmContext.parseTableContext(entity.getClass());
 		TableContext topTableContext = tableContext;
 		final Map<String, SelectMapContext> aliasMap = new HashMap<>();
@@ -914,7 +1076,7 @@ public class OrmUtil {
 			}
 			tableName += (LocalStringUtil.isEmpty(tableContext.getSchema())?tableContext.getName():(tableContext.getSchema() + "." + tableContext.getName())) + " " + tableNameAlias + " ";
 			if(innerJoinContext != null) {
-				tableName += " on t" + innerJoinContext.parentIndex + "." + innerJoinContext.joinContext.getLocalColumn() + "=" + tableNameAlias + "." + innerJoinContext.joinContext.getJoinColumn() + " ";
+				tableName += " ON t" + innerJoinContext.parentIndex + "." + innerJoinContext.joinContext.getLocalColumn() + "=" + tableNameAlias + "." + innerJoinContext.joinContext.getJoinColumn() + " ";
 			}
 //			finalTableNameSqlList.add(tableName + " " + tableNameAlias);
 			
@@ -956,7 +1118,7 @@ public class OrmUtil {
 							if(groupSelectWhere == null) {
 								whereHqlList.add(tmpWhereSql);
 								columnContext.getQueryType().addParamValue(whereHqlValueList, 
-										buildParam(value, columnContext.getJdbcType()), columnContext.getCustomQueryContext());
+										buildParam(value, columnContext, connection), columnContext.getCustomQueryContext());
 							}else {
 								List<Object> tempWhereHqlValueList = new ArrayList<>();
 								columnContext.getQueryType().addParamValue(tempWhereHqlValueList, value, columnContext.getCustomQueryContext());
@@ -972,13 +1134,23 @@ public class OrmUtil {
 				finalWhereValueSqlList.addAll(whereHqlValueList);
 			}
 			
-			if(i == 0) {
-				List<OrderByContext> orderByList = tableContext.getOrderByList();
-				for (OrderByContext orderByContext : orderByList) {
-					finalOrderSqlList.add(tableNameAlias + "." + orderByContext.getColumn() + " " + orderByContext.getOrderByType());
+			if(complexQueryContext != null && complexQueryContext.getOrderList() != null && !complexQueryContext.getOrderList().isEmpty()) {
+			}else {
+				if(i == 0) {
+					List<OrderByContext> orderByList = tableContext.getOrderByList();
+					for (OrderByContext orderByContext : orderByList) {
+						finalOrderSqlList.add(tableNameAlias + "." + orderByContext.getColumn() + " " + orderByContext.getOrderByType());
+					}
 				}
 			}
 			
+			
+		}
+		
+		if(complexQueryContext != null && complexQueryContext.getOrderList() != null && !complexQueryContext.getOrderList().isEmpty()) {
+			List<FieldColumnBuilder> orderList = complexQueryContext.getOrderList();
+			finalOrderSqlList.clear();
+			finalOrderSqlList.addAll(orderList.stream().map(t->t.build(columnParser)).collect(Collectors.toList()));
 		}
 		
 		for (Map.Entry<Integer, GroupSelectWhere> entry : groupWhereMap.entrySet()) {
@@ -1006,6 +1178,11 @@ public class OrmUtil {
 		context.orderSql = finalOrderBySql;
 		context.paramList = finalWhereValueSqlList;
 		context.tableContext = topTableContext;
+		
+		if(complexQueryContext != null) {
+			buildExtendQueryWhere(entity, complexQueryContext.getExtendQueryParam(), context, connection);
+			buildExtendWhere(entity, complexQueryContext.getExtendWhere(), context, connection);
+		}
 		
 		return context;
 	}
@@ -1044,7 +1221,7 @@ public class OrmUtil {
 		return map;
 	}
 	
-	private static <T>SelectQueryContext buildSelectTopWhere(T entity) {
+	private static <T>SelectQueryContext buildSelectTopWhere(T entity, Connection connection) throws SQLException {
 		TableContext tableContext = OrmContext.parseTableContext(entity.getClass());
 		List<String> finalWhereSqlList = new ArrayList<>();
 		List<Object> finalWhereValueSqlList = new ArrayList<>();
@@ -1064,7 +1241,7 @@ public class OrmUtil {
 					if(!LocalStringUtil.isEmpty(tmpWhereSql)) {
 						whereHqlList.add(tmpWhereSql);
 						columnContext.getQueryType().addParamValue(whereHqlValueList, 
-								buildParam(value, columnContext.getJdbcType()), columnContext.getCustomQueryContext());
+								buildParam(value, columnContext, connection), columnContext.getCustomQueryContext());
 					}
 					
 				}
@@ -1144,11 +1321,12 @@ public class OrmUtil {
 				index++;
 			}
 			logParam(finalWhereValueSqlList);
+			long start = System.currentTimeMillis();
 			rs = prepareStatement.executeQuery();
 			rs.next();
 			int total = rs.getInt(1);
 			if(log.isDebugEnabled()) {
-				log.debug("execute result=>result:{}", total);
+				log.debug("execute result=>result:{}, cost:{}", total, System.currentTimeMillis() - start);
 			}
 			return total;
 		}finally {
@@ -1351,6 +1529,195 @@ public class OrmUtil {
 			return (T) map;
 		}else {
 			return (T) bean.getWrappedInstance();
+		}
+	}
+	
+	/**
+	 * 合并数据
+	 * @param entity 数据实体
+	 * @param connection 数据库连接
+	 * @param mergeFields 合并唯一项
+	 * @return 合并结果
+	 * @throws SQLException
+	 */
+	public static <T>MergeResult merge(T entity, Connection connection, String... mergeFields) throws SQLException {
+		return doMerge(entity, false, connection, mergeFields);
+	}
+	/**
+	 * 合并数据(合并所有字段,包括insertable和updatable为false的字段)
+	 * @param entity 数据实体
+	 * @param connection 数据库连接
+	 * @param mergeFields 合并唯一项
+	 * @return 合并结果
+	 * @throws SQLException
+	 */
+	public static <T>MergeResult mergeWithNoUpdatableColumn(T entity, Connection connection, String... mergeFields) throws SQLException {
+		return doMerge(entity, true, connection, mergeFields);
+	}
+	
+	@SuppressWarnings("unchecked")
+	private static <T>MergeResult doMerge(T entity, boolean cancelNoUpdatableInsertable, Connection connection, String... mergeFields) throws SQLException {
+		if(entity == null) {
+			throw new OrmExecuteException("合并对象不能为空");
+		}
+		TableContext tableContext = OrmContext.parseTableContext(entity.getClass());
+		if(tableContext.getIdColumn() == null) {
+			throw new OrmExecuteException("合并对象id配置不能为空");
+		}
+		Map<String, Object> fieldValueMap = new HashMap<String, Object>();
+		BeanWrapper entityBean = new BeanWrapperImpl(entity);
+		Object idVal = entityBean.getPropertyValue(tableContext.getIdColumn().getField());
+		if(mergeFields.length > 0) {
+			Set<String> fieldSet = tableContext.getColumnList().stream().map(t->t.getField()).collect(Collectors.toSet());
+			Object val = null;
+			for (int i = 0; i < mergeFields.length; i++) {
+				if(!fieldSet.contains(mergeFields[i])) {
+					throw new OrmExecuteException("合并对象字段[" + mergeFields[i] + "]并不属于表字段");
+				}
+				val = entityBean.getPropertyValue(mergeFields[i]);
+				if(val == null) {
+					throw new OrmExecuteException("合并对象字段[" + mergeFields[i] + "]中的值不能为空");
+				}
+				fieldValueMap.put(mergeFields[i], val);
+			}
+		}else {
+			if(idVal == null) {
+				throw new OrmExecuteException("合并对象id字段[" + tableContext.getIdColumn().getField() + "]中的值不能为空");
+			}
+			fieldValueMap.put(tableContext.getIdColumn().getField(), idVal);
+		}
+		
+		if(fieldValueMap.isEmpty()) {
+			throw new OrmExecuteException("合并对象中关键值不能为空");
+		}
+		T query = null;
+		try {
+			query = (T) entity.getClass().newInstance();
+		} catch (InstantiationException | IllegalAccessException e) {
+			throw new OrmExecuteException("实例化" + entity.getClass() + "出错");
+		}
+		BeanWrapper queryBean = new BeanWrapperImpl(query);
+		for (Entry<String, Object> entry : fieldValueMap.entrySet()) {
+			queryBean.setPropertyValue(entry.getKey(), entry.getValue());
+		}
+		int total = 0;
+		List<T> list = null;
+		if(mergeFields.length > 0) {
+			PageData<T> pageData = selectPage(query, connection, 1, 1);
+			total = pageData.getTotal();
+			list = pageData.getContent();
+		}else {
+			list = select(query, connection);
+			total = list.size();
+		}
+		
+		
+		if(total > 1) {
+			throw new OrmExecuteException("查询到多条合并的对象");
+		}
+		MergeResult result = new MergeResult();
+		if(total == 0) {
+			InsertUseCustomIdHelper.setForceUseCustomId(true);
+			doInsert(entity, cancelNoUpdatableInsertable, connection);
+			result.setUpdate(false);
+		}else {
+			T originEntity = list.get(0);
+			BeanWrapper originBean = new BeanWrapperImpl(originEntity);
+			idVal = originBean.getPropertyValue(tableContext.getIdColumn().getField());
+			entityBean.setPropertyValue(tableContext.getIdColumn().getField(), idVal);
+			doUpdate(entity, null, cancelNoUpdatableInsertable, connection);
+			result.setUpdate(true);
+		}
+		entityBean = new BeanWrapperImpl(entity);
+		idVal = entityBean.getPropertyValue(tableContext.getIdColumn().getField());
+		result.setId(idVal);
+		return result;
+	}
+	
+	@SuppressWarnings("unchecked")
+	private static <T>void buildExtendQueryWhere(T entity, Map<String, Object> param, SelectQueryContext queryContext, Connection connection) throws SQLException {
+		if(param == null || param.isEmpty()) {
+			return;
+		}
+		TableContext tableContext = OrmContext.parseTableContext(entity.getClass());
+		Class<T> clazz = (Class<T>) entity.getClass();
+		Function<String, String> columnParser = buildColumnParser(clazz, tableContext, queryContext.joinMap, true);
+		List<QueryItemDto> queryItemList = param.entrySet().stream().map(t->new QueryItemDto(t.getKey(), clazz, t.getValue())).collect(Collectors.toList());
+		
+		List<Object> paramValueList = new ArrayList<>();
+		List<String> whereList = new ArrayList<>();
+		List<QueryItemDto> noGroupList = queryItemList.stream().filter(t->LocalStringUtil.isEmpty(t.getGroup())).collect(Collectors.toList());
+		for (QueryItemDto dto : noGroupList) {
+			buildExtendQueryWhereItem(dto, columnParser, paramValueList, whereList);
+		}
+		Map<String, List<QueryItemDto>> orMap = queryItemList.stream().filter(t->!LocalStringUtil.isEmpty(t.getGroup())).collect(Collectors.groupingBy(t->t.getGroup()));
+		for (Entry<String, List<QueryItemDto>> entry : orMap.entrySet()) {
+			List<String> orWhereSql = new ArrayList<>();
+			List<QueryItemDto> orDtoList = entry.getValue();
+			for (QueryItemDto dto : orDtoList) {
+				buildExtendQueryWhereItem(dto, columnParser, paramValueList, orWhereSql);
+			}
+			if(orWhereSql.size() > 1) {
+				whereList.add("(" + LocalStringUtil.join(orWhereSql, " OR ") + ")");
+			}else if(orWhereSql.size() == 1) {
+				whereList.add(orWhereSql.get(0));
+			}
+		}
+		
+		
+		if(!whereList.isEmpty()) {
+			String whereSql = queryContext.whereSql;
+			List<Object> allParamList = queryContext.paramList;
+			if(!LocalStringUtil.isEmpty(whereSql)) {
+				whereSql += " AND ";
+			}else {
+				whereSql += "WHERE ";
+			}
+			queryContext.whereSql = whereSql + LocalStringUtil.join(whereList, " AND ");
+			allParamList.addAll(paramValueList);
+		}
+	}
+	
+	private static void buildExtendQueryWhereItem(QueryItemDto dto, Function<String, String> columnParser, 
+			List<Object> paramValueList, List<String> whereList) {
+		String column = null;
+		QueryType queryType = null;
+		if(dto.getValue() == null) {
+			return;
+		}
+		column = FieldColumnBuilder.create(dto.getFieldName()).build(columnParser);
+		queryType = dto.getQueryType();
+		queryType.addParamValue(paramValueList, dto.getValue(), null);
+		whereList.add(queryType.buildWhereSql(column, dto.getValue(), null));
+	}
+	
+	@SuppressWarnings("unchecked")
+	private static <T>void buildExtendWhere(T entity, Map<FieldColumnBuilder, List<Object>> extendWhereMap, SelectQueryContext queryContext, Connection connection) {
+		if(extendWhereMap == null || extendWhereMap.isEmpty()) {
+			return;
+		}
+		TableContext tableContext = OrmContext.parseTableContext(entity.getClass());
+		Class<T> clazz = (Class<T>) entity.getClass();
+		Function<String, String> columnParser = buildColumnParser(clazz, tableContext, queryContext.joinMap, true);
+		List<String> whereSqlList = new ArrayList<>();
+		List<Object> paramValueList = new ArrayList<>();
+		for (Entry<FieldColumnBuilder, List<Object>> entry : extendWhereMap.entrySet()) {
+			whereSqlList.add(entry.getKey().build(columnParser));
+			if(entry.getValue() != null && !entry.getValue().isEmpty()) {
+				paramValueList.addAll(entry.getValue());
+			}
+		}
+		
+		if(!whereSqlList.isEmpty()) {
+			String whereSql = queryContext.whereSql;
+			List<Object> allParamList = queryContext.paramList;
+			if(!LocalStringUtil.isEmpty(whereSql)) {
+				whereSql += " AND ";
+			}else {
+				whereSql += "WHERE ";
+			}
+			queryContext.whereSql = whereSql + LocalStringUtil.join(whereSqlList, " AND ");
+			allParamList.addAll(paramValueList);
 		}
 	}
 	

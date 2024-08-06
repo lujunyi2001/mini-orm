@@ -91,4 +91,17 @@ public class FieldColumnBuilder {
 	public String[] getField() {
 		return field;
 	}
+	
+	/**
+	 * 克隆该对象
+	 * @return
+	 */
+	public FieldColumnBuilder clone() {
+		FieldColumnBuilder cloneObj = new FieldColumnBuilder();
+		cloneObj.alias = this.alias;
+		cloneObj.decorator = this.decorator;
+		cloneObj.decorators = this.decorators;
+		cloneObj.field = this.field;
+		return cloneObj;
+	}
 }
