@@ -8,6 +8,20 @@
 	<version>1.0.0</version>
 	<name>mini-orm</name>
 
+
+	<scm>
+        <url>https://github.com/lujunyi2001/mini-orm</url>
+        <connection>scm:git:https://github.com/lujunyi2001/mini-orm.git</connection>
+        <developerConnection>scm:git:https://github.com/lujunyi2001/mini-orm.git</developerConnection>
+    </scm>
+
+    <developers>
+        <developer>
+            <name>lujunyi</name>
+            <email>lujunyi_2001@sina.com</email>
+        </developer>
+    </developers>
+    
 	<properties>
 		<maven.test.skip>true</maven.test.skip>
 		<slf4j.version>1.7.20</slf4j.version>
