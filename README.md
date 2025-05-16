@@ -368,6 +368,12 @@ public class ComplexQueryContext {
 	 */
 	public void addOrderList(FieldColumnBuilder builder)
 	
+    /**
+	 * 添加扩展查询条件 
+	 * @param columnBuilder 查询字段
+	 * @param paramValues 当前条件查询参数列表
+	 */
+	public void addExtendWhere(FieldColumnBuilder columnBuilder, List<Object> paramValues)
 	
 }
 ```
